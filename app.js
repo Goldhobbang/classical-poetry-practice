@@ -1,61 +1,77 @@
-const STORAGE_KEY = "korean-practicer-poems";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  addDoc,
+  collection,
+  getDocs,
+  getFirestore,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  where
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const tabButtons = document.querySelectorAll(".tab");
-const panels = document.querySelectorAll(".panel");
+// 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
+// apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
+const firebaseConfig = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+};
 
-const poemNameInput = document.getElementById("poemName");
-const poemTextInput = document.getElementById("poemText");
-const savePoemBtn = document.getElementById("savePoemBtn");
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const translationsRef = collection(db, "translations");
+
+const routePages = {
+  add: document.getElementById("addPage"),
+  practice: document.getElementById("practicePage"),
+  result: document.getElementById("resultPage"),
+  poems: document.getElementById("poemsPage")
+};
+
+const navLinks = document.querySelectorAll(".nav-link");
+
+const authorNameInput = document.getElementById("authorName");
+const taskTitleInput = document.getElementById("taskTitle");
+const sourceTextInput = document.getElementById("sourceText");
 const startPracticeBtn = document.getElementById("startPracticeBtn");
-const savedList = document.getElementById("savedList");
-const loadPoemBtn = document.getElementById("loadPoemBtn");
-const deletePoemBtn = document.getElementById("deletePoemBtn");
+const goPoemsBtn = document.getElementById("goPoemsBtn");
+const recentPoemsList = document.getElementById("recentPoemsList");
 
-const sourceLine = document.getElementById("sourceLine");
-const typingStage = document.getElementById("typingStage");
 const previousLines = document.getElementById("previousLines");
+const currentLine = document.getElementById("currentLine");
 const nextLines = document.getElementById("nextLines");
 const answerInput = document.getElementById("answerInput");
 const nextLineBtn = document.getElementById("nextLineBtn");
+
 const progressText = document.getElementById("progressText");
 const progressFill = document.getElementById("progressFill");
-
 const resultOutput = document.getElementById("resultOutput");
 const copyResultBtn = document.getElementById("copyResultBtn");
-
+const poemsList = document.getElementById("poemsList");
+const poemsSort = document.getElementById("poemsSort");
+const poemsSearch = document.getElementById("poemsSearch");
+const poemsSearchResetBtn = document.getElementById("poemsSearchResetBtn");
 const toast = document.getElementById("toast");
-const confirmModal = document.getElementById("confirmModal");
-const modalMessage = document.getElementById("modalMessage");
-const cancelModalBtn = document.getElementById("cancelModalBtn");
-const confirmModalBtn = document.getElementById("confirmModalBtn");
 
-let currentLines = [];
+let toastTimer = null;
+let unsubscribeRecent = null;
+let unsubscribePoems = null;
+let isSaving = false;
+
+let currentSourceText = "";
+let currentAuthorName = "";
+let baseTaskTitle = "";
+let resolvedTaskTitle = "";
+let practiceLines = [];
 let currentIndex = 0;
 let answers = [];
-let toastTimer = null;
-let onConfirmAction = null;
-
-function loadPoemsMap() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (_error) {
-    return {};
-  }
-}
-
-function savePoemsMap(map) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-}
-
-function switchTab(tabId) {
-  tabButtons.forEach((btn) => {
-    btn.classList.toggle("is-active", btn.dataset.tab === tabId);
-  });
-  panels.forEach((panel) => {
-    panel.classList.toggle("is-active", panel.id === tabId);
-  });
-}
+let poemsItems = [];
 
 function showToast(message) {
   toast.textContent = message;
@@ -68,41 +84,7 @@ function showToast(message) {
   }, 1800);
 }
 
-function openConfirm(message, onConfirm) {
-  modalMessage.textContent = message;
-  onConfirmAction = onConfirm;
-  confirmModal.classList.add("show");
-  confirmModal.setAttribute("aria-hidden", "false");
-}
-
-function closeConfirm() {
-  confirmModal.classList.remove("show");
-  confirmModal.setAttribute("aria-hidden", "true");
-  onConfirmAction = null;
-}
-
-function refreshSavedList() {
-  const poemsMap = loadPoemsMap();
-  const names = Object.keys(poemsMap).sort((a, b) => a.localeCompare(b, "ko"));
-
-  savedList.innerHTML = "";
-  if (!names.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "저장된 작품 없음";
-    savedList.appendChild(option);
-    return;
-  }
-
-  names.forEach((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    savedList.appendChild(option);
-  });
-}
-
-function getNormalizedLines(text) {
+function normalizeLines(text) {
   return text
     .replace(/\r\n/g, "\n")
     .split("\n")
@@ -110,210 +92,386 @@ function getNormalizedLines(text) {
     .filter((line) => line.length > 0);
 }
 
-function animateSentenceChange() {
-  typingStage.classList.remove("animate");
-  // Reflow to restart CSS animation.
-  void typingStage.offsetWidth;
-  typingStage.classList.add("animate");
+function updateProgress() {
+  const total = practiceLines.length;
+  const done = Math.min(currentIndex, total);
+  progressText.textContent = `${done} / ${total}`;
+  progressFill.style.width = total ? `${(done / total) * 100}%` : "0%";
 }
 
-function updateProgressBar(total) {
-  if (!total) {
-    progressFill.style.width = "0%";
-    return;
-  }
-
-  const completed = Math.min(currentIndex, total);
-  const ratio = (completed / total) * 100;
-  progressFill.style.width = `${ratio}%`;
-  progressFill.style.filter = `saturate(${0.9 + ratio / 200})`;
+function setSavingState(value) {
+  isSaving = value;
+  answerInput.disabled = value;
+  nextLineBtn.disabled = value;
+  answerInput.classList.toggle("is-loading", value);
 }
 
-function updatePracticeUI() {
-  const total = currentLines.length;
-  progressText.textContent = `${Math.min(currentIndex, total)} / ${total}`;
-  updateProgressBar(total);
-
+function renderPractice() {
+  updateProgress();
+  const total = practiceLines.length;
   if (!total) {
-    sourceLine.textContent = "연습을 시작하면 여기에 현재 줄이 표시됩니다.";
-    previousLines.textContent = "아직 완료된 줄이 없습니다.";
-    nextLines.textContent = "대기 중인 줄이 없습니다.";
+    previousLines.textContent = "아직 완료된 문장이 없습니다.";
+    currentLine.textContent = "문장 추가 페이지에서 연습을 시작하세요.";
+    nextLines.textContent = "다음 문장이 없습니다.";
     answerInput.value = "";
-    progressText.textContent = "0 / 0";
     return;
   }
 
   if (currentIndex >= total) {
-    sourceLine.textContent = "입력이 완료되었습니다.";
-    previousLines.textContent = currentLines
+    previousLines.textContent = practiceLines
       .map((line, idx) => `${idx + 1}. ${line}\n→ ${answers[idx] || "(미입력)"}`)
       .join("\n\n");
-    nextLines.textContent = "모든 줄 입력 완료";
+    currentLine.textContent = "연습이 완료되었습니다.";
+    nextLines.textContent = "모든 문장 입력 완료";
     answerInput.value = "";
-    progressText.textContent = `${total} / ${total}`;
-    updateProgressBar(total);
+    resultOutput.value = answers.join("\n");
+    location.hash = "#/result";
     return;
   }
 
-  const done = currentLines
-    .slice(0, currentIndex)
-    .map((line, idx) => `${idx + 1}. ${line}\n→ ${answers[idx] || "(미입력)"}`)
-    .join("\n\n");
-  const waiting = currentLines
-    .slice(currentIndex + 1)
-    .map((line, idx) => `${currentIndex + idx + 2}. ${line}`)
-    .join("\n");
+  previousLines.textContent =
+    practiceLines
+      .slice(0, currentIndex)
+      .map((line, idx) => `${idx + 1}. ${line}\n→ ${answers[idx] || "(미입력)"}`)
+      .join("\n\n") || "아직 완료된 문장이 없습니다.";
 
-  previousLines.textContent = done || "아직 완료된 줄이 없습니다.";
-  nextLines.textContent = waiting || "다음 줄이 마지막입니다.";
-  sourceLine.textContent = currentLines[currentIndex];
-  answerInput.value = answers[currentIndex] ?? "";
-  animateSentenceChange();
-  answerInput.focus();
+  currentLine.textContent = practiceLines[currentIndex];
+
+  nextLines.textContent =
+    practiceLines
+      .slice(currentIndex + 1)
+      .map((line, idx) => `${currentIndex + idx + 2}. ${line}`)
+      .join("\n") || "다음 문장이 없습니다.";
+
+  answerInput.value = answers[currentIndex] || "";
+  if (!isSaving) {
+    answerInput.focus();
+  }
 }
 
-function showResultIfFinished() {
-  if (!currentLines.length || currentIndex < currentLines.length) {
-    return;
+function parseTitle(baseTitle) {
+  const match = baseTitle.match(/^(.*)\((\d+)\)$/);
+  if (!match) {
+    return { root: baseTitle, index: 0 };
+  }
+  return {
+    root: match[1].trim(),
+    index: Number(match[2])
+  };
+}
+
+async function resolveUniqueTaskTitle(title) {
+  const trimmed = title.trim();
+  const prefixQuery = query(
+    translationsRef,
+    where("taskTitle", ">=", trimmed),
+    where("taskTitle", "<=", `${trimmed}\uf8ff`)
+  );
+  const snapshot = await getDocs(prefixQuery);
+  if (!snapshot.docs.length) {
+    return trimmed;
   }
 
-  const merged = answers.join("\n");
-  resultOutput.value = merged;
-  switchTab("resultTab");
-  showToast("모든 줄 입력이 완료되었습니다.");
-}
-
-function startPracticeFromText(text) {
-  const lines = getNormalizedLines(text);
-  if (!lines.length) {
-    showToast("연습할 줄이 없습니다. 텍스트를 확인해주세요.");
-    return;
+  const usedTitles = new Set(snapshot.docs.map((docSnap) => docSnap.data().taskTitle).filter(Boolean));
+  if (!usedTitles.has(trimmed)) {
+    return trimmed;
   }
 
-  currentLines = lines;
-  currentIndex = 0;
-  answers = Array.from({ length: lines.length }, () => "");
-  resultOutput.value = "";
-  updatePracticeUI();
-  switchTab("practiceTab");
-  showToast("연습을 시작합니다.");
+  let maxIndex = 0;
+  usedTitles.forEach((existing) => {
+    const { root, index } = parseTitle(existing);
+    if (root === trimmed && index > maxIndex) {
+      maxIndex = index;
+    }
+  });
+  return `${trimmed}(${maxIndex + 1})`;
 }
 
-function saveCurrentLineAndMoveNext() {
-  if (!currentLines.length || currentIndex >= currentLines.length) {
-    showToast("먼저 연습할 작품을 시작해주세요.");
+async function saveCurrentSentence() {
+  if (!practiceLines.length || currentIndex >= practiceLines.length || isSaving) {
     return;
   }
 
   answers[currentIndex] = answerInput.value.trim();
-  currentIndex += 1;
-  updatePracticeUI();
-  showResultIfFinished();
+  setSavingState(true);
+  try {
+    await addDoc(translationsRef, {
+      authorName: currentAuthorName,
+      taskTitle: resolvedTaskTitle,
+      originalText: currentSourceText,
+      translatedText: answers[currentIndex],
+      createdAt: serverTimestamp()
+    });
+    currentIndex += 1;
+    renderPractice();
+    if (currentIndex >= practiceLines.length) {
+      showToast("모든 풀이가 저장되었습니다.");
+    } else {
+      showToast("DB에 성공적으로 저장되었습니다!");
+    }
+  } catch (_error) {
+    showToast("DB 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
+  } finally {
+    setSavingState(false);
+  }
 }
 
-tabButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    switchTab(btn.dataset.tab);
+function renderRecentList(snapshot) {
+  if (!snapshot.docs.length) {
+    recentPoemsList.textContent = "아직 등록된 원문이 없습니다.";
+    return;
+  }
+  const uniqueItems = [];
+  const seen = new Set();
+  snapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data();
+    const key = `${data.taskTitle}::${data.originalText}`;
+    if (!seen.has(key) && uniqueItems.length < 5) {
+      seen.add(key);
+      uniqueItems.push(data);
+    }
   });
-});
 
-savePoemBtn.addEventListener("click", () => {
-  const name = poemNameInput.value.trim();
-  const text = poemTextInput.value.trim();
+  recentPoemsList.innerHTML = uniqueItems
+    .map((item) => {
+      return `<article class="list-item">
+        <p class="item-title">${item.taskTitle || "(제목 없음)"} · ${item.authorName || "익명"}</p>
+        <p class="item-content">${(item.originalText || "").slice(0, 150)}${(item.originalText || "").length > 150 ? "..." : ""}</p>
+      </article>`;
+    })
+    .join("");
+}
 
-  if (!name) {
-    showToast("작품 이름을 입력해주세요.");
-    return;
+function getCreatedAtMillis(item) {
+  const ts = item.createdAt;
+  if (!ts) {
+    return 0;
   }
-  if (!text) {
-    showToast("작품 전문을 입력해주세요.");
-    return;
+  if (typeof ts.toMillis === "function") {
+    return ts.toMillis();
   }
-
-  const map = loadPoemsMap();
-  map[name] = text;
-  savePoemsMap(map);
-  refreshSavedList();
-  savedList.value = name;
-  showToast(`"${name}" 작품이 저장되었습니다.`);
-});
-
-loadPoemBtn.addEventListener("click", () => {
-  const selected = savedList.value;
-  const map = loadPoemsMap();
-  if (!selected || !map[selected]) {
-    showToast("불러올 작품을 선택해주세요.");
-    return;
+  if (typeof ts.seconds === "number") {
+    return ts.seconds * 1000;
   }
-  poemNameInput.value = selected;
-  poemTextInput.value = map[selected];
-  showToast(`"${selected}" 작품을 불러왔습니다.`);
-});
+  return 0;
+}
 
-deletePoemBtn.addEventListener("click", () => {
-  const selected = savedList.value;
-  const map = loadPoemsMap();
-  if (!selected || !map[selected]) {
-    showToast("삭제할 작품이 없습니다.");
-    return;
+function getSortedPoems(items) {
+  const sortType = poemsSort.value;
+  const sorted = [...items];
+  if (sortType === "title") {
+    sorted.sort((a, b) => (a.taskTitle || "").localeCompare(b.taskTitle || "", "ko"));
+    return sorted;
   }
+  if (sortType === "author") {
+    sorted.sort((a, b) => (a.authorName || "").localeCompare(b.authorName || "", "ko"));
+    return sorted;
+  }
+  sorted.sort((a, b) => getCreatedAtMillis(b) - getCreatedAtMillis(a));
+  return sorted;
+}
 
-  openConfirm(`"${selected}" 작품을 삭제할까요?`, () => {
-    delete map[selected];
-    savePoemsMap(map);
-    refreshSavedList();
-    showToast(`"${selected}" 작품을 삭제했습니다.`);
+function filterPoems(items) {
+  const keyword = poemsSearch.value.trim().toLowerCase();
+  if (!keyword) {
+    return items;
+  }
+  return items.filter((item) => {
+    const title = (item.taskTitle || "").toLowerCase();
+    const author = (item.authorName || "").toLowerCase();
+    const text = (item.originalText || "").toLowerCase();
+    return title.includes(keyword) || author.includes(keyword) || text.includes(keyword);
   });
-});
+}
 
-startPracticeBtn.addEventListener("click", () => {
-  startPracticeFromText(poemTextInput.value);
-});
-
-nextLineBtn.addEventListener("click", saveCurrentLineAndMoveNext);
-
-answerInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    saveCurrentLineAndMoveNext();
+function renderPoemsCards(items) {
+  if (!items.length) {
+    poemsList.textContent = "조건에 맞는 원문이 없습니다.";
+    return;
   }
-});
+  poemsList.innerHTML = items
+    .map((item) => {
+      return `<article class="poem-card">
+        <p class="item-title">${item.taskTitle || "(제목 없음)"}</p>
+        <p class="item-meta">${item.authorName || "익명"}</p>
+        <p class="item-content">${item.originalText || "(원문 없음)"}</p>
+      </article>`;
+    })
+    .join("");
+}
 
-copyResultBtn.addEventListener("click", async () => {
-  const text = resultOutput.value;
-  if (!text) {
-    showToast("복사할 결과가 없습니다.");
+function renderPoemsList() {
+  if (!poemsItems.length) {
+    poemsList.textContent = "등록된 원문이 없습니다.";
+    return;
+  }
+  const filtered = filterPoems(poemsItems);
+  const sorted = getSortedPoems(filtered);
+  renderPoemsCards(sorted);
+}
+
+function subscribeAddPage() {
+  if (unsubscribeRecent) {
+    return;
+  }
+  const q = query(translationsRef, orderBy("createdAt", "desc"), limit(30));
+  unsubscribeRecent = onSnapshot(
+    q,
+    (snapshot) => renderRecentList(snapshot),
+    () => {
+      recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
+    }
+  );
+}
+
+function subscribePoemsPage() {
+  if (unsubscribePoems) {
+    return;
+  }
+  const q = query(translationsRef, orderBy("createdAt", "desc"));
+  unsubscribePoems = onSnapshot(
+    q,
+    (snapshot) => {
+      const grouped = new Map();
+      snapshot.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        const key = `${data.taskTitle}::${data.originalText}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, data);
+        }
+      });
+      poemsItems = [...grouped.values()];
+      renderPoemsList();
+    },
+    () => {
+      poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+    }
+  );
+}
+
+function teardownPageSubscriptions(route) {
+  if (route !== "add" && unsubscribeRecent) {
+    unsubscribeRecent();
+    unsubscribeRecent = null;
+  }
+  if (route !== "poems" && unsubscribePoems) {
+    unsubscribePoems();
+    unsubscribePoems = null;
+  }
+}
+
+function getCurrentRoute() {
+  const raw = (location.hash || "#/add").replace("#/", "");
+  return routePages[raw] ? raw : "add";
+}
+
+function renderRoute() {
+  const route = getCurrentRoute();
+  Object.entries(routePages).forEach(([key, node]) => {
+    node.classList.toggle("is-active", key === route);
+  });
+  navLinks.forEach((link) => {
+    const isActive = link.getAttribute("href") === `#/${route}`;
+    link.classList.toggle("is-active", isActive);
+  });
+  teardownPageSubscriptions(route);
+  if (route === "add") {
+    subscribeAddPage();
+  }
+  if (route === "poems") {
+    subscribePoemsPage();
+  }
+}
+
+startPracticeBtn.addEventListener("click", async () => {
+  const authorName = authorNameInput.value.trim();
+  const taskTitle = taskTitleInput.value.trim();
+  const sourceText = sourceTextInput.value.trim();
+  const lines = normalizeLines(sourceText);
+
+  if (!authorName) {
+    showToast("작성자 이름을 입력해주세요.");
+    return;
+  }
+  if (!taskTitle) {
+    showToast("작업 제목을 입력해주세요.");
+    return;
+  }
+  if (!lines.length) {
+    showToast("원문을 입력해주세요.");
     return;
   }
 
   try {
-    await navigator.clipboard.writeText(text);
+    resolvedTaskTitle = await resolveUniqueTaskTitle(taskTitle);
+  } catch (_error) {
+    showToast("제목 중복 확인 중 오류가 발생했습니다.");
+    return;
+  }
+
+  currentAuthorName = authorName;
+  baseTaskTitle = taskTitle;
+  currentSourceText = sourceText;
+  practiceLines = lines;
+  currentIndex = 0;
+  answers = Array.from({ length: lines.length }, () => "");
+  if (resolvedTaskTitle !== baseTaskTitle) {
+    taskTitleInput.value = resolvedTaskTitle;
+    showToast(`중복 제목 감지: "${resolvedTaskTitle}"로 저장됩니다.`);
+  } else {
+    showToast("연습을 시작합니다.");
+  }
+  renderPractice();
+  location.hash = "#/practice";
+});
+
+goPoemsBtn.addEventListener("click", () => {
+  location.hash = "#/poems";
+});
+
+nextLineBtn.addEventListener("click", () => {
+  void saveCurrentSentence();
+});
+
+answerInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    void saveCurrentSentence();
+  }
+});
+
+copyResultBtn.addEventListener("click", async () => {
+  if (!resultOutput.value.trim()) {
+    showToast("복사할 내용이 없습니다.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(resultOutput.value);
     showToast("결과를 복사했습니다.");
   } catch (_error) {
-    showToast("복사 실패: 직접 선택 후 복사해주세요.");
+    showToast("복사에 실패했습니다.");
   }
 });
 
-cancelModalBtn.addEventListener("click", closeConfirm);
-confirmModalBtn.addEventListener("click", () => {
-  if (onConfirmAction) {
-    onConfirmAction();
-  }
-  closeConfirm();
+poemsSort.addEventListener("change", () => {
+  renderPoemsList();
 });
 
-confirmModal.addEventListener("click", (event) => {
-  if (event.target === confirmModal) {
-    closeConfirm();
-  }
+poemsSearch.addEventListener("input", () => {
+  renderPoemsList();
 });
 
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && confirmModal.classList.contains("show")) {
-    closeConfirm();
-  }
+poemsSearchResetBtn.addEventListener("click", () => {
+  poemsSearch.value = "";
+  poemsSort.value = "latest";
+  renderPoemsList();
 });
 
-refreshSavedList();
-updatePracticeUI();
-switchTab("libraryTab");
+window.addEventListener("hashchange", renderRoute);
+
+renderPractice();
+if (!location.hash) {
+  location.hash = "#/add";
+} else {
+  renderRoute();
+}
