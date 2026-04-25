@@ -833,44 +833,14 @@ if (poemsPageSize) {
   });
 }
 
+// Handle clicks in poems list (cards)
 poemsList.addEventListener("click", (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-
-  // handle recent list load buttons
-  const recentItem = target.closest(".list-item");
-  if (recentItem) {
-    if (target.classList.contains("js-load-poem")) {
-      const title = recentItem.dataset.title || "";
-      const author = recentItem.dataset.author || "";
-      const text = recentItem.dataset.text || "";
-      // load into add form
-      authorNameInput.value = author;
-      taskTitleInput.value = title;
-      sourceTextInput.value = text;
-      showToast('원문을 불러왔습니다.');
-      return;
-    }
-    if (target.classList.contains("js-start-practice")) {
-      const title = recentItem.dataset.title || "";
-      const author = recentItem.dataset.author || "";
-      const text = recentItem.dataset.text || "";
-      startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
-      return;
-    }
-  }
-
+  if (!(target instanceof HTMLElement)) return;
   const card = target.closest(".poem-card");
-  if (!(card instanceof HTMLElement)) {
-    return;
-  }
-
+  if (!(card instanceof HTMLElement)) return;
   const detail = card.querySelector(".poem-detail");
-  if (!(detail instanceof HTMLElement)) {
-    return;
-  }
+  if (!(detail instanceof HTMLElement)) return;
 
   if (target.classList.contains("js-toggle-detail")) {
     const isHidden = detail.hasAttribute("hidden");
@@ -888,13 +858,36 @@ poemsList.addEventListener("click", (event) => {
     const title = card.querySelector(".item-title")?.textContent || "";
     const author = card.querySelector(".item-meta")?.textContent || "";
     const text = card.querySelector(".item-content")?.textContent || "";
-    startPracticeWithPoem({
-      taskTitle: title,
-      authorName: author,
-      originalText: text
-    });
+    startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
   }
 });
+
+// Handle recent list buttons (load + practice)
+if (recentPoemsList) {
+  recentPoemsList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const recentItem = target.closest('.list-item');
+    if (!recentItem) return;
+    if (target.classList.contains('js-load-poem')) {
+      const title = recentItem.dataset.title || '';
+      const author = recentItem.dataset.author || '';
+      const text = recentItem.dataset.text || '';
+      authorNameInput.value = author;
+      taskTitleInput.value = title;
+      sourceTextInput.value = text;
+      showToast('원문을 불러왔습니다.');
+      return;
+    }
+    if (target.classList.contains('js-start-practice')) {
+      const title = recentItem.dataset.title || '';
+      const author = recentItem.dataset.author || '';
+      const text = recentItem.dataset.text || '';
+      startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
+      return;
+    }
+  });
+}
 
 async function testFirebaseConnection() {
   try {

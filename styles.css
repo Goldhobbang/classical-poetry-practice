@@ -162,6 +162,18 @@ button {
   color: var(--text);
 }
 
+.btn-secondary {
+  background: #5a8a7b;
+  border-color: #4f7b6d;
+  color: #fff;
+}
+
+.btn-clear {
+  background: #f8d7da;
+  border-color: #f1c0c6;
+  color: #721c24;
+}
+
 .guide {
   margin: 0 0 12px;
   color: var(--muted);
