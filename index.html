@@ -45,12 +45,13 @@
         <textarea id="sourceText" rows="10" placeholder="원문 전체를 붙여넣으세요."></textarea>
 
         <div class="row">
-          <button id="startPracticeBtn" class="btn-primary">연습 시작</button>
+          <button id="savePoemBtn" class="btn-primary">글 추가</button>
+          <button id="startPracticeBtn" class="btn-soft">이 글로 연습 시작</button>
           <button id="goPoemsBtn" class="btn-soft">전체 원문 보기</button>
         </div>
 
         <hr />
-        <h3>최근 등록된 전문 5개</h3>
+        <h3>최근 등록된 제목 5개</h3>
         <div id="recentPoemsList" class="list-block">최근 등록 내역을 불러오는 중...</div>
       </section>
 
@@ -106,6 +107,19 @@
           </select>
           <input id="poemsSearch" type="search" placeholder="제목/작성자/원문 검색" />
           <button id="poemsSearchResetBtn" class="btn-soft">초기화</button>
+        </div>
+        <div class="poems-toolbar" style="margin-top:8px; gap:6px;">
+          <label for="poemsPageSize">페이지당</label>
+          <select id="poemsPageSize">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+          </select>
+          <div id="poemsPager" style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <button id="poemsPrevBtn" class="btn-soft">이전</button>
+            <span id="poemsPageInfo">1 / 1</span>
+            <button id="poemsNextBtn" class="btn-soft">다음</button>
+          </div>
         </div>
         <div id="poemsList" class="poems-grid">원문 목록을 불러오는 중...</div>
       </section>

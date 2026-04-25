@@ -11,7 +11,30 @@ Desktop.ini
 *.local
 
 # Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Claude harness and local state
+.claude/
+
+# Build / distribution
+dist/
+build/
+
+# Temporary / swap
+*.swp
+*.tmp
+
+# Keys / certs
+*.pem
+
+# Local install scripts (optional)
+install-claude-code.cmd
+install-claude-code.ps1

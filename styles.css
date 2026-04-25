@@ -10,14 +10,19 @@
 
 * {
   box-sizing: border-box;
-  font-family: "Pretendard", sans-serif;
+  font-family: "Pretendard", sans-serif !important;
+}
+
+*::before,
+*::after {
+  font-family: "Pretendard", sans-serif !important;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Pretendard", sans-serif;
+  font-family: "Pretendard", sans-serif !important;
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -278,8 +283,33 @@ textarea:disabled {
   background: #fff;
 }
 
+.poem-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.poem-detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #ece8e2;
+}
+
 .poems-grid {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+#poemsPager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#poemsPageInfo {
+  min-width: 56px;
+  text-align: center;
+  color: var(--muted);
 }
 
 .item-title {

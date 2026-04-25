@@ -5,11 +5,11 @@ import {
   getDocs,
   getFirestore,
   limit,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  where
+  where,
+  startAfter
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
@@ -39,6 +39,7 @@ const navLinks = document.querySelectorAll(".nav-link");
 const authorNameInput = document.getElementById("authorName");
 const taskTitleInput = document.getElementById("taskTitle");
 const sourceTextInput = document.getElementById("sourceText");
+const savePoemBtn = document.getElementById("savePoemBtn");
 const startPracticeBtn = document.getElementById("startPracticeBtn");
 const goPoemsBtn = document.getElementById("goPoemsBtn");
 const recentPoemsList = document.getElementById("recentPoemsList");
@@ -57,21 +58,42 @@ const poemsList = document.getElementById("poemsList");
 const poemsSort = document.getElementById("poemsSort");
 const poemsSearch = document.getElementById("poemsSearch");
 const poemsSearchResetBtn = document.getElementById("poemsSearchResetBtn");
+// Pagination controls
+const poemsPager = document.getElementById("poemsPager");
+const poemsPrevBtn = document.getElementById("poemsPrevBtn");
+const poemsNextBtn = document.getElementById("poemsNextBtn");
+const poemsPageInfo = document.getElementById("poemsPageInfo");
+const poemsPageSize = document.getElementById("poemsPageSize");
 const toast = document.getElementById("toast");
 
-let toastTimer = null;
-let unsubscribeRecent = null;
-let unsubscribePoems = null;
-let isSaving = false;
+const state = {
+  poemsCache: [],
+  selectedPoem: null,
+  practiceLines: [],
+  currentIndex: 0,
+  answers: [],
+  // pagination
+  page: 1,
+  pageSize: 10,
+  // server-side pagination caches and cursors
+  pages: {}, // page number -> items array
+  pageCursors: {}, // page number -> lastVisible doc snapshot for that page
+  pageHasMore: {}, // page number -> boolean indicating if there may be more pages after this one
+  searchKeyword: "",
+  isFetchingPoems: false
+};
 
-let currentSourceText = "";
-let currentAuthorName = "";
-let baseTaskTitle = "";
-let resolvedTaskTitle = "";
-let practiceLines = [];
-let currentIndex = 0;
-let answers = [];
-let poemsItems = [];
+// debounce helper
+function debounce(fn, wait) {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), wait);
+  };
+}
+
+let toastTimer = null;
+let isSubmitting = false;
 
 function showToast(message) {
   toast.textContent = message;
@@ -84,6 +106,15 @@ function showToast(message) {
   }, 1800);
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function normalizeLines(text) {
   return text
     .replace(/\r\n/g, "\n")
@@ -93,14 +124,16 @@ function normalizeLines(text) {
 }
 
 function updateProgress() {
-  const total = practiceLines.length;
-  const done = Math.min(currentIndex, total);
+  const total = state.practiceLines.length;
+  const done = Math.min(state.currentIndex, total);
   progressText.textContent = `${done} / ${total}`;
   progressFill.style.width = total ? `${(done / total) * 100}%` : "0%";
 }
 
-function setSavingState(value) {
-  isSaving = value;
+function setSubmittingState(value) {
+  isSubmitting = value;
+  savePoemBtn.disabled = value;
+  startPracticeBtn.disabled = value;
   answerInput.disabled = value;
   nextLineBtn.disabled = value;
   answerInput.classList.toggle("is-loading", value);
@@ -108,43 +141,43 @@ function setSavingState(value) {
 
 function renderPractice() {
   updateProgress();
-  const total = practiceLines.length;
+  const total = state.practiceLines.length;
   if (!total) {
     previousLines.textContent = "아직 완료된 문장이 없습니다.";
-    currentLine.textContent = "문장 추가 페이지에서 연습을 시작하세요.";
+    currentLine.textContent = "문장 추가 또는 원문 목록에서 연습할 글을 선택하세요.";
     nextLines.textContent = "다음 문장이 없습니다.";
     answerInput.value = "";
     return;
   }
 
-  if (currentIndex >= total) {
-    previousLines.textContent = practiceLines
-      .map((line, idx) => `${idx + 1}. ${line}\n→ ${answers[idx] || "(미입력)"}`)
+  if (state.currentIndex >= total) {
+    previousLines.textContent = state.practiceLines
+      .map((line, idx) => `${idx + 1}. ${line}\n→ ${state.answers[idx] || "(미입력)"}`)
       .join("\n\n");
     currentLine.textContent = "연습이 완료되었습니다.";
     nextLines.textContent = "모든 문장 입력 완료";
     answerInput.value = "";
-    resultOutput.value = answers.join("\n");
+    resultOutput.value = state.answers.join("\n");
     location.hash = "#/result";
     return;
   }
 
   previousLines.textContent =
-    practiceLines
-      .slice(0, currentIndex)
-      .map((line, idx) => `${idx + 1}. ${line}\n→ ${answers[idx] || "(미입력)"}`)
+    state.practiceLines
+      .slice(0, state.currentIndex)
+      .map((line, idx) => `${idx + 1}. ${line}\n→ ${state.answers[idx] || "(미입력)"}`)
       .join("\n\n") || "아직 완료된 문장이 없습니다.";
 
-  currentLine.textContent = practiceLines[currentIndex];
+  currentLine.textContent = state.practiceLines[state.currentIndex];
 
   nextLines.textContent =
-    practiceLines
-      .slice(currentIndex + 1)
-      .map((line, idx) => `${currentIndex + idx + 2}. ${line}`)
+    state.practiceLines
+      .slice(state.currentIndex + 1)
+      .map((line, idx) => `${state.currentIndex + idx + 2}. ${line}`)
       .join("\n") || "다음 문장이 없습니다.";
 
-  answerInput.value = answers[currentIndex] || "";
-  if (!isSaving) {
+  answerInput.value = state.answers[state.currentIndex] || "";
+  if (!isSubmitting) {
     answerInput.focus();
   }
 }
@@ -162,6 +195,9 @@ function parseTitle(baseTitle) {
 
 async function resolveUniqueTaskTitle(title) {
   const trimmed = title.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
   const prefixQuery = query(
     translationsRef,
     where("taskTitle", ">=", trimmed),
@@ -187,59 +223,68 @@ async function resolveUniqueTaskTitle(title) {
   return `${trimmed}(${maxIndex + 1})`;
 }
 
-async function saveCurrentSentence() {
-  if (!practiceLines.length || currentIndex >= practiceLines.length || isSaving) {
+async function addPoemToDb(poem) {
+  const taskTitle = await resolveUniqueTaskTitle(poem.taskTitle);
+  await addDoc(translationsRef, {
+    authorName: poem.authorName,
+    taskTitle,
+    originalText: poem.originalText,
+    translatedText: "",
+    createdAt: serverTimestamp()
+  });
+  return taskTitle;
+}
+
+function startPracticeWithPoem(poem) {
+  const lines = normalizeLines(poem.originalText);
+  if (!lines.length) {
+    showToast("연습할 문장이 없습니다.");
     return;
   }
 
-  answers[currentIndex] = answerInput.value.trim();
-  setSavingState(true);
-  try {
-    await addDoc(translationsRef, {
-      authorName: currentAuthorName,
-      taskTitle: resolvedTaskTitle,
-      originalText: currentSourceText,
-      translatedText: answers[currentIndex],
-      createdAt: serverTimestamp()
-    });
-    currentIndex += 1;
-    renderPractice();
-    if (currentIndex >= practiceLines.length) {
-      showToast("모든 풀이가 저장되었습니다.");
-    } else {
-      showToast("DB에 성공적으로 저장되었습니다!");
-    }
-  } catch (_error) {
-    showToast("DB 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
-  } finally {
-    setSavingState(false);
-  }
+  state.selectedPoem = {
+    authorName: poem.authorName,
+    taskTitle: poem.taskTitle,
+    originalText: poem.originalText
+  };
+  state.practiceLines = lines;
+  state.currentIndex = 0;
+  state.answers = Array.from({ length: lines.length }, () => "");
+  renderPractice();
+  location.hash = "#/practice";
 }
 
-function renderRecentList(snapshot) {
-  if (!snapshot.docs.length) {
+function saveCurrentSentence() {
+  if (!state.practiceLines.length || state.currentIndex >= state.practiceLines.length || isSubmitting) {
+    return;
+  }
+
+  state.answers[state.currentIndex] = answerInput.value.trim();
+  state.currentIndex += 1;
+  renderPractice();
+}
+
+function renderRecentTitles(items) {
+  if (!items.length) {
     recentPoemsList.textContent = "아직 등록된 원문이 없습니다.";
     return;
   }
-  const uniqueItems = [];
+  const fragment = document.createDocumentFragment();
   const seen = new Set();
-  snapshot.docs.forEach((docSnap) => {
-    const data = docSnap.data();
-    const key = `${data.taskTitle}::${data.originalText}`;
-    if (!seen.has(key) && uniqueItems.length < 5) {
+  let count = 0;
+  items.forEach((data) => {
+    const key = `${data.taskTitle}::${data.authorName}`;
+    if (!seen.has(key) && count < 5) {
       seen.add(key);
-      uniqueItems.push(data);
+      count += 1;
+      const article = document.createElement("article");
+      article.className = "list-item";
+      article.innerHTML = `<p class="item-title">${escapeHtml(data.taskTitle || "(제목 없음)")}</p>`;
+      fragment.appendChild(article);
     }
   });
-
-  recentPoemsList.innerHTML = uniqueItems
-    .map((item) => {
-      return `<article class="list-item">
-        <p class="item-title">${item.taskTitle || "(제목 없음)"} · ${item.authorName || "익명"}</p>
-        <p class="item-content">${(item.originalText || "").slice(0, 150)}${(item.originalText || "").length > 150 ? "..." : ""}</p>
-      </article>`;
-    })
-    .join("");
+  recentPoemsList.innerHTML = "";
+  recentPoemsList.appendChild(fragment);
 }
 
 function getCreatedAtMillis(item) {
@@ -289,74 +334,210 @@ function renderPoemsCards(items) {
     poemsList.textContent = "조건에 맞는 원문이 없습니다.";
     return;
   }
-  poemsList.innerHTML = items
+  const html = items
     .map((item) => {
       return `<article class="poem-card">
-        <p class="item-title">${item.taskTitle || "(제목 없음)"}</p>
-        <p class="item-meta">${item.authorName || "익명"}</p>
-        <p class="item-content">${item.originalText || "(원문 없음)"}</p>
+        <div class="poem-head">
+          <div>
+            <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
+            <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
+          </div>
+          <div class="row">
+            <button type="button" class="btn-soft js-toggle-detail">상세 보기</button>
+            <button type="button" class="btn-primary js-start-practice">이 글로 연습하기</button>
+          </div>
+        </div>
+        <div class="poem-detail" hidden>
+          <p class="item-content">${escapeHtml(item.originalText || "(원문 없음)")}</p>
+        </div>
       </article>`;
     })
     .join("");
+  poemsList.innerHTML = html;
+}
+
+// updatePager: if totalItems is provided, show exact pages; otherwise show current page and enable/disable next based on hasMore
+function updatePager(totalItems, hasMore = undefined) {
+  const pageSize = state.pageSize;
+  if (typeof totalItems === "number") {
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+    if (poemsPageInfo) {
+      poemsPageInfo.textContent = `${state.page} / ${totalPages}`;
+    }
+    if (poemsPrevBtn) poemsPrevBtn.disabled = state.page <= 1;
+    if (poemsNextBtn) poemsNextBtn.disabled = state.page >= totalPages;
+  } else {
+    // unknown total count: show page only; disable next if we know there's no more
+    if (poemsPageInfo) {
+      poemsPageInfo.textContent = hasMore === false ? `${state.page}` : `${state.page}`;
+    }
+    if (poemsPrevBtn) poemsPrevBtn.disabled = state.page <= 1;
+    if (poemsNextBtn) {
+      if (typeof hasMore === "boolean") poemsNextBtn.disabled = !hasMore;
+      else poemsNextBtn.disabled = false; // unknown
+    }
+  }
 }
 
 function renderPoemsList() {
-  if (!poemsItems.length) {
+  // Determine pageSize from selector
+  const pageSize = Number(poemsPageSize?.value || state.pageSize) || state.pageSize;
+  state.pageSize = pageSize;
+
+  // If server-paginated pages exist for current page, use them
+  const pageItems = state.pages[state.page] || [];
+
+  if (!pageItems || pageItems.length === 0) {
+    // If we have no cached pages and no global cache, show empty message
     poemsList.textContent = "등록된 원문이 없습니다.";
+    if (poemsPager) poemsPager.style.display = "none";
+    updatePager(0, false);
     return;
   }
-  const filtered = filterPoems(poemsItems);
-  const sorted = getSortedPoems(filtered);
+
+  // If a client-side filter (search within page) is needed, apply it
+  let itemsToRender = pageItems;
+  if (state.searchKeyword) {
+    const kw = state.searchKeyword.toLowerCase();
+    itemsToRender = pageItems.filter((item) => {
+      const title = (item.taskTitle || "").toLowerCase();
+      const author = (item.authorName || "").toLowerCase();
+      const text = (item.originalText || "").toLowerCase();
+      return title.includes(kw) || author.includes(kw) || text.includes(kw);
+    });
+  }
+
+  // Sorting on the client for items on this page (if user changed sort)
+  const sorted = getSortedPoems(itemsToRender);
   renderPoemsCards(sorted);
+
+  // Show pager: use hasMore heuristic (true if this page returned full pageSize)
+  const hasMore = !!state.pageHasMore[state.page];
+  if (poemsPager) poemsPager.style.display = "flex";
+  updatePager(undefined, hasMore);
 }
 
-function subscribeAddPage() {
-  if (unsubscribeRecent) {
-    return;
-  }
+async function fetchRecentTitles() {
+  recentPoemsList.textContent = "최근 등록 목록을 불러오는 중...";
   const q = query(translationsRef, orderBy("createdAt", "desc"), limit(30));
-  unsubscribeRecent = onSnapshot(
-    q,
-    (snapshot) => renderRecentList(snapshot),
-    () => {
-      recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
-    }
-  );
+  try {
+    const snapshot = await getDocs(q);
+    const items = snapshot.docs.map((docSnap) => docSnap.data());
+    renderRecentTitles(items);
+  } catch (_error) {
+    recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
+  }
 }
 
-function subscribePoemsPage() {
-  if (unsubscribePoems) {
-    return;
-  }
-  const q = query(translationsRef, orderBy("createdAt", "desc"));
-  unsubscribePoems = onSnapshot(
-    q,
-    (snapshot) => {
-      const grouped = new Map();
-      snapshot.docs.forEach((docSnap) => {
-        const data = docSnap.data();
-        const key = `${data.taskTitle}::${data.originalText}`;
-        if (!grouped.has(key)) {
-          grouped.set(key, data);
-        }
-      });
-      poemsItems = [...grouped.values()];
+// Server-side paginated fetch. Call with fetchPoems(page = 1)
+async function fetchPoems(page = 1) {
+  if (state.isFetchingPoems) return;
+  state.isFetchingPoems = true;
+  poemsList.textContent = "원문 목록을 불러오는 중...";
+  const pageSize = Number(poemsPageSize?.value || state.pageSize) || state.pageSize;
+
+  try {
+    // If we already cached this page, just render it
+    if (state.pages[page]) {
+      state.page = page;
       renderPoemsList();
-    },
-    () => {
-      poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+      state.isFetchingPoems = false;
+      return;
     }
-  );
-}
 
-function teardownPageSubscriptions(route) {
-  if (route !== "add" && unsubscribeRecent) {
-    unsubscribeRecent();
-    unsubscribeRecent = null;
-  }
-  if (route !== "poems" && unsubscribePoems) {
-    unsubscribePoems();
-    unsubscribePoems = null;
+    // Build base query depending on whether there's a search keyword
+    const keyword = state.searchKeyword;
+    let q;
+    // Determine sorting field/direction from UI
+    const sortVal = poemsSort?.value || "latest";
+    let sortField = "createdAt";
+    let sortDir = "desc";
+    if (sortVal === "title") {
+      sortField = "taskTitle";
+      sortDir = "asc";
+    } else if (sortVal === "author") {
+      sortField = "authorName";
+      sortDir = "asc";
+    }
+
+    if (keyword) {
+      // Try taskTitle prefix search server-side (simple query). Note: orders by taskTitle.
+      const start = keyword;
+      const end = keyword + "";
+      if (page === 1) {
+        q = query(
+          translationsRef,
+          orderBy("taskTitle", "asc"),
+          where("taskTitle", ">=", start),
+          where("taskTitle", "<=", end),
+          limit(pageSize)
+        );
+      } else {
+        const prevCursor = state.pageCursors[page - 1];
+        if (!prevCursor) {
+          await fetchPoems(1);
+          state.isFetchingPoems = false;
+          return await fetchPoems(page);
+        }
+        q = query(
+          translationsRef,
+          orderBy("taskTitle", "asc"),
+          where("taskTitle", ">=", start),
+          where("taskTitle", "<=", end),
+          startAfter(prevCursor),
+          limit(pageSize)
+        );
+      }
+    } else {
+      // Default: page-by-page using startAfter cursors with chosen sort
+      if (page === 1) {
+        q = query(translationsRef, orderBy(sortField, sortDir), limit(pageSize));
+      } else {
+        const prevCursor = state.pageCursors[page - 1];
+        if (!prevCursor) {
+          // Defensive: if we don't have previous cursor, fetch page 1 first
+          await fetchPoems(1);
+          state.isFetchingPoems = false;
+          return await fetchPoems(page);
+        }
+        q = query(translationsRef, orderBy(sortField, sortDir), startAfter(prevCursor), limit(pageSize));
+      }
+    }
+
+    const snapshot = await getDocs(q);
+    if (!snapshot || !snapshot.docs) {
+      poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+      state.isFetchingPoems = false;
+      return;
+    }
+
+    // Map documents to data and de-duplicate within this page (same title+text)
+    const grouped = new Map();
+    snapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      const key = `${data.taskTitle}::${data.originalText}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, data);
+      }
+    });
+    const items = [...grouped.values()];
+
+    // Cache page items and cursor
+    state.pages[page] = items;
+    const last = snapshot.docs[snapshot.docs.length - 1];
+    // If number of docs returned < pageSize, there is no next page
+    state.pageHasMore[page] = snapshot.docs.length === pageSize;
+    if (last) state.pageCursors[page] = last;
+
+    state.page = page;
+    renderPoemsList();
+
+  } catch (error) {
+    console.error("fetchPoems error", error);
+    poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+  } finally {
+    state.isFetchingPoems = false;
   }
 }
 
@@ -374,20 +555,19 @@ function renderRoute() {
     const isActive = link.getAttribute("href") === `#/${route}`;
     link.classList.toggle("is-active", isActive);
   });
-  teardownPageSubscriptions(route);
+
   if (route === "add") {
-    subscribeAddPage();
+    void fetchRecentTitles();
   }
   if (route === "poems") {
-    subscribePoemsPage();
+    void fetchPoems();
   }
 }
 
-startPracticeBtn.addEventListener("click", async () => {
+savePoemBtn.addEventListener("click", async () => {
   const authorName = authorNameInput.value.trim();
   const taskTitle = taskTitleInput.value.trim();
   const sourceText = sourceTextInput.value.trim();
-  const lines = normalizeLines(sourceText);
 
   if (!authorName) {
     showToast("작성자 이름을 입력해주세요.");
@@ -397,32 +577,41 @@ startPracticeBtn.addEventListener("click", async () => {
     showToast("작업 제목을 입력해주세요.");
     return;
   }
-  if (!lines.length) {
+  if (!sourceText) {
     showToast("원문을 입력해주세요.");
     return;
   }
 
+  setSubmittingState(true);
   try {
-    resolvedTaskTitle = await resolveUniqueTaskTitle(taskTitle);
+    const resolvedTitle = await addPoemToDb({
+      authorName,
+      taskTitle,
+      originalText: sourceText
+    });
+    taskTitleInput.value = resolvedTitle;
+    showToast("글이 DB에 저장되었습니다.");
+    await fetchRecentTitles();
   } catch (_error) {
-    showToast("제목 중복 확인 중 오류가 발생했습니다.");
+    showToast("글 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
+  } finally {
+    setSubmittingState(false);
+  }
+});
+
+startPracticeBtn.addEventListener("click", () => {
+  const authorName = authorNameInput.value.trim();
+  const taskTitle = taskTitleInput.value.trim();
+  const sourceText = sourceTextInput.value.trim();
+  if (!authorName || !taskTitle || !sourceText) {
+    showToast("이름, 제목, 원문을 모두 입력해주세요.");
     return;
   }
-
-  currentAuthorName = authorName;
-  baseTaskTitle = taskTitle;
-  currentSourceText = sourceText;
-  practiceLines = lines;
-  currentIndex = 0;
-  answers = Array.from({ length: lines.length }, () => "");
-  if (resolvedTaskTitle !== baseTaskTitle) {
-    taskTitleInput.value = resolvedTaskTitle;
-    showToast(`중복 제목 감지: "${resolvedTaskTitle}"로 저장됩니다.`);
-  } else {
-    showToast("연습을 시작합니다.");
-  }
-  renderPractice();
-  location.hash = "#/practice";
+  startPracticeWithPoem({
+    authorName,
+    taskTitle,
+    originalText: sourceText
+  });
 });
 
 goPoemsBtn.addEventListener("click", () => {
@@ -430,13 +619,13 @@ goPoemsBtn.addEventListener("click", () => {
 });
 
 nextLineBtn.addEventListener("click", () => {
-  void saveCurrentSentence();
+  saveCurrentSentence();
 });
 
 answerInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    void saveCurrentSentence();
+    saveCurrentSentence();
   }
 });
 
@@ -454,18 +643,122 @@ copyResultBtn.addEventListener("click", async () => {
 });
 
 poemsSort.addEventListener("change", () => {
-  renderPoemsList();
+  state.page = 1;
+  // when sort changes, we should clear cached pages and re-fetch
+  state.pages = {};
+  state.pageCursors = {};
+  void fetchPoems(1);
 });
 
-poemsSearch.addEventListener("input", () => {
-  renderPoemsList();
-});
+// Debounced search: reset pages and perform server-side prefix search on title when possible
+const debouncedSearch = debounce((ev) => {
+  const v = (ev.target.value || "").trim();
+  state.searchKeyword = v;
+  state.pages = {};
+  state.pageCursors = {};
+  void fetchPoems(1);
+}, 250);
+poemsSearch.addEventListener("input", debouncedSearch);
 
 poemsSearchResetBtn.addEventListener("click", () => {
   poemsSearch.value = "";
   poemsSort.value = "latest";
-  renderPoemsList();
+  state.searchKeyword = "";
+  state.page = 1;
+  state.pages = {};
+  state.pageCursors = {};
+  void fetchPoems(1);
 });
+
+// Pager events (if elements exist)
+if (poemsPrevBtn) {
+  poemsPrevBtn.addEventListener("click", async () => {
+    if (state.page > 1) {
+      const targetPage = state.page - 1;
+      if (state.pages[targetPage]) {
+        state.page = targetPage;
+        renderPoemsList();
+      } else {
+        // fetch previous page if not cached (shouldn't normally happen)
+        await fetchPoems(targetPage);
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  });
+}
+if (poemsNextBtn) {
+  poemsNextBtn.addEventListener("click", async () => {
+    const targetPage = state.page + 1;
+    if (state.pages[targetPage]) {
+      state.page = targetPage;
+      renderPoemsList();
+    } else {
+      // fetch next page (will use cursor from previous page)
+      await fetchPoems(targetPage);
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+}
+if (poemsPageSize) {
+  poemsPageSize.addEventListener("change", () => {
+    state.page = 1;
+    state.pages = {};
+    state.pageCursors = {};
+    void fetchPoems(1);
+  });
+}
+
+poemsList.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const card = target.closest(".poem-card");
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+
+  const detail = card.querySelector(".poem-detail");
+  if (!(detail instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.classList.contains("js-toggle-detail")) {
+    const isHidden = detail.hasAttribute("hidden");
+    if (isHidden) {
+      detail.removeAttribute("hidden");
+      target.textContent = "닫기";
+    } else {
+      detail.setAttribute("hidden", "true");
+      target.textContent = "상세 보기";
+    }
+    return;
+  }
+
+  if (target.classList.contains("js-start-practice")) {
+    const title = card.querySelector(".item-title")?.textContent || "";
+    const author = card.querySelector(".item-meta")?.textContent || "";
+    const text = card.querySelector(".item-content")?.textContent || "";
+    startPracticeWithPoem({
+      taskTitle: title,
+      authorName: author,
+      originalText: text
+    });
+  }
+});
+
+async function testFirebaseConnection() {
+  try {
+    const q = query(translationsRef, limit(1));
+    await getDocs(q);
+    console.info("[Firebase] 연결 성공");
+    showToast("Firebase 연결 성공");
+  } catch (error) {
+    console.error("[Firebase] 연결 실패", error);
+    showToast("Firebase 연결 실패");
+  }
+}
 
 window.addEventListener("hashchange", renderRoute);
 
@@ -475,3 +768,4 @@ if (!location.hash) {
 } else {
   renderRoute();
 }
+void testFirebaseConnection();
