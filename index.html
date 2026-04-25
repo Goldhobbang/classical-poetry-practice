@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>고전시가 현대어풀이 연습기</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <p class="eyebrow">Korean Classical Poetry Practice</p>
+        <h1>고전시가 현대어풀이 연습기</h1>
+        <p class="subtitle">고전의 문장을 현대어로 차분히 옮기며 연습하세요.</p>
+      </header>
+
+      <nav class="tabs" aria-label="기능 탭">
+        <button class="tab is-active" data-tab="libraryTab">작품 관리</button>
+        <button class="tab" data-tab="practiceTab">연습</button>
+        <button class="tab" data-tab="resultTab">결과</button>
+      </nav>
+
+      <section id="libraryTab" class="panel is-active card">
+        <h2>작품 등록 / 불러오기</h2>
+        <label for="poemName">작품 이름</label>
+        <input id="poemName" type="text" placeholder="예: 관동별곡" />
+
+        <div class="row">
+          <label for="poemText">고전시가 전문 (줄바꿈 유지)</label>
+        </div>
+        <textarea
+          id="poemText"
+          rows="12"
+          placeholder="여기에 고전시가 전문을 붙여넣으세요."
+        ></textarea>
+
+        <div class="row">
+          <button id="savePoemBtn" class="btn-primary">저장</button>
+          <button id="startPracticeBtn" class="btn-soft">이 텍스트로 연습 시작</button>
+        </div>
+
+        <hr />
+
+        <label for="savedList">저장된 작품</label>
+        <div class="row">
+          <select id="savedList"></select>
+          <button id="loadPoemBtn" class="btn-soft">불러오기</button>
+          <button id="deletePoemBtn" class="btn-danger">삭제</button>
+        </div>
+      </section>
+
+      <section class="panel card" id="practiceTab">
+        <h2>줄 단위 입력 연습</h2>
+        <p class="guide">현재 줄을 입력하고 Enter(Shift+Enter는 줄바꿈)로 다음 줄로 이동하세요.</p>
+        <div class="progress-wrap">
+          <div class="progress-head">
+            <span>진행률</span>
+            <span id="progressText">0 / 0</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="practice-box">
+          <div class="practice-block before">
+            <p class="label">앞서 적은 문장</p>
+            <div id="previousLines" class="lines lines-before">아직 완료된 줄이 없습니다.</div>
+          </div>
+
+          <div class="practice-block current">
+            <p class="label">현재 풀이할 원문</p>
+            <div id="typingStage" class="typing-stage">
+              <p id="sourceLine" class="source-line">연습을 시작하면 여기에 현재 줄이 표시됩니다.</p>
+              <textarea
+                id="answerInput"
+                rows="3"
+                class="answer-input"
+                placeholder="원문의 현대어 풀이를 바로 아래에 입력하세요"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="practice-block after">
+            <p class="label">뒤에 풀이할 문장</p>
+            <div id="nextLines" class="lines lines-after">대기 중인 줄이 없습니다.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="nextLineBtn" class="btn-primary">다음 줄</button>
+        </div>
+      </section>
+
+      <section class="panel card" id="resultTab">
+        <h2>완성 결과 모아보기</h2>
+        <textarea id="resultOutput" rows="10" readonly placeholder="연습 완료 후 결과가 여기에 모입니다."></textarea>
+        <div class="row">
+          <button id="copyResultBtn" class="btn-primary">결과 복사</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="confirmModal" class="modal-backdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h3 id="modalTitle">확인</h3>
+        <p id="modalMessage">정말 진행할까요?</p>
+        <div class="row">
+          <button id="cancelModalBtn" class="btn-soft">취소</button>
+          <button id="confirmModalBtn" class="btn-danger">확인</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
