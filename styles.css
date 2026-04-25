@@ -269,7 +269,6 @@ button:active:not(:disabled) {
   display: grid;
   gap: 14px;
   grid-template-rows: auto 1fr auto;
-  min-height: calc(100vh - 300px);
 }
 
 .practice-pane {
@@ -287,7 +286,7 @@ button:active:not(:disabled) {
   border-color: #d9cec2;
   grid-row: 2;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
 }
 
@@ -323,8 +322,7 @@ button:active:not(:disabled) {
 
 .answer-input {
   resize: vertical;
-  min-height: 100px;
-  flex-grow: 1;
+  min-height: 60px;
   font-size: 0.95rem;
 }
 
