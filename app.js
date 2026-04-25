@@ -1,16 +1,9 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  addDoc,
-  collection,
-  getDocs,
-  getFirestore,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  where,
-  startAfter
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+// Lazy-load Firebase modules to avoid blocking initial render
+let firebaseApp = null;
+let db = null;
+let translationsRef = null;
+let firebaseFns = null;
+let firebaseLoaded = false;
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
@@ -28,9 +21,33 @@ if (!firebaseConfig || !firebaseConfig.apiKey) {
   console.warn('[Firebase] No firebaseConfig found on window.__FIREBASE_CONFIG__. Make sure to create config/firebase-config.js and include it before app.js.');
 }
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const translationsRef = collection(db, "translations");
+// Lazy-load firebase modules when needed to avoid blocking initial render
+async function ensureFirebase() {
+  if (firebaseLoaded) return;
+  try {
+    const appModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
+    const fsModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
+    firebaseApp = appModule.initializeApp(firebaseConfig);
+    db = fsModule.getFirestore(firebaseApp);
+    translationsRef = fsModule.collection(db, 'translations');
+    firebaseFns = {
+      addDoc: fsModule.addDoc,
+      getDocs: fsModule.getDocs,
+      collection: fsModule.collection,
+      limit: fsModule.limit,
+      orderBy: fsModule.orderBy,
+      query: fsModule.query,
+      serverTimestamp: fsModule.serverTimestamp,
+      where: fsModule.where,
+      startAfter: fsModule.startAfter
+    };
+    firebaseLoaded = true;
+    console.info('[Firebase] Modules loaded');
+  } catch (e) {
+    console.error('[Firebase] Failed to load modules', e);
+    throw e;
+  }
+}
 
 const routePages = {
   add: document.getElementById("addPage"),
@@ -207,10 +224,11 @@ async function resolveUniqueTaskTitle(title) {
   // 보통 1~2회 쿼리에서 종료되어 add 속도가 훨씬 안정적입니다.
   let candidate = trimmed;
   let suffix = 0;
+  await ensureFirebase();
   while (suffix < 500) {
-    const existsQuery = query(translationsRef, where("taskTitle", "==", candidate), limit(1));
-    const snapshot = await getDocs(existsQuery);
-    if (snapshot.empty) {
+    const existsQuery = firebaseFns.query(translationsRef, firebaseFns.where("taskTitle", "==", candidate), firebaseFns.limit(1));
+    const snapshot = await firebaseFns.getDocs(existsQuery);
+    if (!snapshot || snapshot.empty) {
       return candidate;
     }
     suffix += 1;
@@ -221,12 +239,14 @@ async function resolveUniqueTaskTitle(title) {
 
 async function addPoemToDb(poem) {
   const taskTitle = await resolveUniqueTaskTitle(poem.taskTitle);
-  const docRef = await addDoc(translationsRef, {
+  await ensureFirebase();
+  const docRef = await firebaseFns.addDoc(translationsRef, {
     authorName: poem.authorName,
     taskTitle,
     originalText: poem.originalText,
     translatedText: "",
-    createdAt: serverTimestamp()
+    createdAt: firebaseFns.serverTimestamp(),
+    ownerId: poem.ownerId || null
   });
   return {
     id: docRef.id,
@@ -421,9 +441,10 @@ function renderPoemsList() {
 
 async function fetchRecentTitles() {
   recentPoemsList.textContent = "최근 등록 목록을 불러오는 중...";
-  const q = query(translationsRef, orderBy("createdAt", "desc"), limit(30));
+  await ensureFirebase();
+  const q = firebaseFns.query(translationsRef, firebaseFns.orderBy("createdAt", "desc"), firebaseFns.limit(30));
   try {
-    const snapshot = await getDocs(q);
+    const snapshot = await firebaseFns.getDocs(q);
     const items = snapshot.docs.map((docSnap) => docSnap.data());
     renderRecentTitles(items);
   } catch (_error) {
@@ -467,12 +488,12 @@ async function fetchPoems(page = 1) {
       const start = keyword;
       const end = keyword + "";
       if (page === 1) {
-        q = query(
+        q = firebaseFns.query(
           translationsRef,
-          orderBy("taskTitle", "asc"),
-          where("taskTitle", ">=", start),
-          where("taskTitle", "<=", end),
-          limit(pageSize)
+          firebaseFns.orderBy("taskTitle", "asc"),
+          firebaseFns.where("taskTitle", ">=", start),
+          firebaseFns.where("taskTitle", "<=", end),
+          firebaseFns.limit(pageSize)
         );
       } else {
         const prevCursor = state.pageCursors[page - 1];
@@ -481,19 +502,19 @@ async function fetchPoems(page = 1) {
           state.isFetchingPoems = false;
           return await fetchPoems(page);
         }
-        q = query(
+        q = firebaseFns.query(
           translationsRef,
-          orderBy("taskTitle", "asc"),
-          where("taskTitle", ">=", start),
-          where("taskTitle", "<=", end),
-          startAfter(prevCursor),
-          limit(pageSize)
+          firebaseFns.orderBy("taskTitle", "asc"),
+          firebaseFns.where("taskTitle", ">=", start),
+          firebaseFns.where("taskTitle", "<=", end),
+          firebaseFns.startAfter(prevCursor),
+          firebaseFns.limit(pageSize)
         );
       }
     } else {
       // Default: page-by-page using startAfter cursors with chosen sort
       if (page === 1) {
-        q = query(translationsRef, orderBy(sortField, sortDir), limit(pageSize));
+        q = firebaseFns.query(translationsRef, firebaseFns.orderBy(sortField, sortDir), firebaseFns.limit(pageSize));
       } else {
         const prevCursor = state.pageCursors[page - 1];
         if (!prevCursor) {
@@ -502,11 +523,11 @@ async function fetchPoems(page = 1) {
           state.isFetchingPoems = false;
           return await fetchPoems(page);
         }
-        q = query(translationsRef, orderBy(sortField, sortDir), startAfter(prevCursor), limit(pageSize));
+        q = firebaseFns.query(translationsRef, firebaseFns.orderBy(sortField, sortDir), firebaseFns.startAfter(prevCursor), firebaseFns.limit(pageSize));
       }
     }
 
-    const snapshot = await getDocs(q);
+    const snapshot = await firebaseFns.getDocs(q);
     if (!snapshot || !snapshot.docs) {
       poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
       state.isFetchingPoems = false;
@@ -758,8 +779,9 @@ poemsList.addEventListener("click", (event) => {
 
 async function testFirebaseConnection() {
   try {
-    const q = query(translationsRef, limit(1));
-    await getDocs(q);
+    await ensureFirebase();
+    const q = firebaseFns.query(translationsRef, firebaseFns.limit(1));
+    await firebaseFns.getDocs(q);
     console.info("[Firebase] 연결 성공");
     showToast("Firebase 연결 성공");
   } catch (error) {
@@ -776,4 +798,21 @@ if (!location.hash) {
 } else {
   renderRoute();
 }
-void testFirebaseConnection();
+
+// Defer Firebase initialization and data fetch to background so the initial UI shows immediately
+(async () => {
+  try {
+    await ensureFirebase();
+    // only fetch data relevant to current route (non-blocking)
+    const route = getCurrentRoute();
+    if (route === 'add') {
+      void fetchRecentTitles();
+    }
+    if (route === 'poems') {
+      void fetchPoems(1);
+    }
+    void testFirebaseConnection();
+  } catch (e) {
+    console.warn('Firebase modules failed to load:', e);
+  }
+})();
