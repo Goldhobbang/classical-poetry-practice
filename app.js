@@ -46,6 +46,30 @@ async function ensureFirebase() {
     };
     // Do not load analytics to avoid extra network requests and potential adblock interference
 
+    // Initialize Auth and sign in anonymously so Firestore rules with auth checks pass
+    try {
+      const authModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
+      firebaseAuth = authModule.getAuth(firebaseApp);
+      // If no current user, sign in anonymously
+      if (!firebaseAuth.currentUser) {
+        try {
+          const cred = await authModule.signInAnonymously(firebaseAuth);
+          firebaseCurrentUserUid = cred.user.uid;
+          console.info('[Firebase] Signed in anonymously', firebaseCurrentUserUid);
+        } catch (authErr) {
+          console.error('[Firebase] Anonymous sign-in failed', authErr && authErr.code, authErr && authErr.message, authErr);
+          showErrorBox(`Anonymous sign-in failed:\n${authErr?.code || ''} ${authErr?.message || authErr}`);
+          // rethrow so callers know auth didn't complete
+          throw authErr;
+        }
+      } else {
+        firebaseCurrentUserUid = firebaseAuth.currentUser.uid;
+      }
+    } catch (err) {
+      console.error('[Firebase] Auth load/sign-in failed', err && err.code, err && err.message, err);
+      throw err;
+    }
+
     firebaseLoaded = true;
     console.info('[Firebase] Modules loaded');
   } catch (e) {
@@ -489,6 +513,7 @@ async function fetchRecentTitles() {
     console.error('[Firebase] fetchRecentTitles failed', error && error.code, error && error.message, error);
     recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
     showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
+    showErrorBox(`${error?.code || ''} ${error?.message || String(error)}`);
   }
 }
 
