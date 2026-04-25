@@ -38,3 +38,6 @@ build/
 # Local install scripts (optional)
 install-claude-code.cmd
 install-claude-code.ps1
+
+# Local config files
+config/
