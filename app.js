@@ -378,11 +378,11 @@ function renderRecentTitles(items) {
       const safeTitle = escapeHtml(data.taskTitle || "(제목 없음)");
       const safeAuthor = escapeHtml(data.authorName || "익명");
       article.innerHTML = `
-        <div>
+        <div class="poem-info">
           <p class="item-title">${safeTitle}</p>
           <p class="item-meta">${safeAuthor}</p>
         </div>
-        <div class="row" style="margin: 0;">
+        <div class="row" style="margin: 0; margin-top: 8px;">
           <button type="button" class="btn-soft js-load-poem">불러오기</button>
           <button type="button" class="btn-primary js-start-practice">연습</button>
         </div>
@@ -449,17 +449,15 @@ function renderPoemsCards(items) {
     .map((item) => {
       // include admin-only buttons but keep them hidden until admin logs in
       return `<article class="poem-card">
-        <div class="poem-head">
-          <div>
-            <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
-            <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
-          </div>
-          <div class="row" style="margin: 0; flex-wrap: nowrap;">
-            <button type="button" class="btn-soft js-toggle-detail">상세</button>
-            <button type="button" class="btn-primary js-start-practice">연습</button>
-            <button type="button" class="btn-soft js-edit" data-id="${item.id}" style="display:none">수정</button>
-            <button type="button" class="btn-clear js-delete" data-id="${item.id}" style="display:none">삭제</button>
-          </div>
+        <div class="poem-info">
+          <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
+          <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
+        </div>
+        <div class="poem-actions">
+          <button type="button" class="btn-soft js-toggle-detail">상세</button>
+          <button type="button" class="btn-primary js-start-practice">연습</button>
+          <button type="button" class="btn-soft js-edit" data-id="${item.id}" style="display:none">수정</button>
+          <button type="button" class="btn-clear js-delete" data-id="${item.id}" style="display:none">삭제</button>
         </div>
         <div class="poem-detail" hidden>
           <p class="item-content">${escapeHtml(item.originalText || "(원문 없음)")}</p>

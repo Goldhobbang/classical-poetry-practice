@@ -323,9 +323,8 @@ textarea:disabled {
 
 .list-item {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr;
   gap: 12px;
-  align-items: center;
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px;
@@ -338,8 +337,16 @@ textarea:disabled {
   box-shadow: 0 4px 12px rgba(127, 103, 84, 0.08);
 }
 
-.list-item > div:first-child {
-  min-width: 0;
+.poem-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.list-item .row {
+  display: flex;
+  gap: 8px;
+  margin: 0;
 }
 
 .list-item button {
@@ -360,13 +367,15 @@ textarea:disabled {
   font-weight: 500;
 }
 
-.list-item,
 .poem-card {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px;
   background: #fff;
   transition: all 0.2s ease;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
 }
 
 .poem-card:hover {
@@ -374,16 +383,20 @@ textarea:disabled {
   box-shadow: 0 6px 16px rgba(127, 103, 84, 0.1);
 }
 
-.poem-head {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 12px;
+.poem-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.poem-head > div:first-child {
-  min-width: 0;
+.poem-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.poem-actions button {
+  margin: 0;
 }
 
 .poem-detail {
@@ -419,17 +432,18 @@ textarea:disabled {
 }
 
 .item-title {
-  margin: 0 0 6px;
+  margin: 0;
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   line-height: 1.4;
   color: var(--text);
 }
 
 .item-meta {
-  margin: 0 0 6px;
+  margin: 0;
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.85rem;
+  opacity: 0.75;
 }
 
 .item-content {
