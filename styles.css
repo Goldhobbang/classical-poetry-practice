@@ -353,3 +353,33 @@ hr {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* error box for detailed firebase errors */
+#errorBox, .error-box {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  width: 480px;
+  max-width: calc(100% - 40px);
+  background: #fff;
+  border: 1px solid #e7e5e1;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(48,40,34,0.06);
+}
+#errorBox[hidden] { display: none; }
+.error-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:8px;
+}
+.error-text {
+  background:#111;
+  color:#fff;
+  padding:8px;
+  border-radius:8px;
+  max-height:220px;
+  overflow:auto;
+  white-space:pre-wrap;
+}

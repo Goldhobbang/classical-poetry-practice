@@ -4,6 +4,8 @@ let db = null;
 let translationsRef = null;
 let firebaseFns = null;
 let firebaseLoaded = false;
+let firebaseAuth = null;
+let firebaseCurrentUserUid = null;
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
@@ -133,7 +135,35 @@ function showToast(message) {
   }
   toastTimer = setTimeout(() => {
     toast.classList.remove("show");
-  }, 1800);
+  }, 5000);
+}
+
+// Error UI helper: show detailed error box and allow copying
+const errorBox = document.getElementById('errorBox');
+const errorText = document.getElementById('errorText');
+const copyErrorBtn = document.getElementById('copyErrorBtn');
+const closeErrorBtn = document.getElementById('closeErrorBtn');
+
+function showErrorBox(text) {
+  if (!errorBox || !errorText) return;
+  errorText.textContent = text;
+  errorBox.removeAttribute('hidden');
+}
+
+if (copyErrorBtn) {
+  copyErrorBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(errorText.textContent);
+      showToast('오류 메시지를 복사했습니다.');
+    } catch (e) {
+      showToast('클립보드 복사에 실패했습니다.');
+    }
+  });
+}
+if (closeErrorBtn) {
+  closeErrorBtn.addEventListener('click', () => {
+    if (errorBox) errorBox.setAttribute('hidden', 'true');
+  });
 }
 
 function escapeHtml(value) {
