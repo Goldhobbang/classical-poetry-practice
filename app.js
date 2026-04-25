@@ -302,13 +302,14 @@ async function resolveUniqueTaskTitle(title) {
 async function addPoemToDb(poem) {
   const taskTitle = await resolveUniqueTaskTitle(poem.taskTitle);
   await ensureFirebase();
+  const ownerIdToUse = firebaseCurrentUserUid || poem.ownerId || null;
   const docRef = await firebaseFns.addDoc(translationsRef, {
     authorName: poem.authorName,
     taskTitle,
     originalText: poem.originalText,
     translatedText: "",
     createdAt: firebaseFns.serverTimestamp(),
-    ownerId: poem.ownerId || null
+    ownerId: ownerIdToUse
   });
   return {
     id: docRef.id,
@@ -675,7 +676,8 @@ savePoemBtn.addEventListener("click", async () => {
     const createdPoem = await addPoemToDb({
       authorName,
       taskTitle,
-      originalText: sourceText
+      originalText: sourceText,
+      ownerId: firebaseCurrentUserUid
     });
     // 저장 직후 로컬 상태를 먼저 확정하고 라우팅하여 레이스 컨디션을 방지합니다.
     taskTitleInput.value = createdPoem.taskTitle;
@@ -684,7 +686,9 @@ savePoemBtn.addEventListener("click", async () => {
     // 목록 갱신은 백그라운드로 처리하여 라우팅 지연을 줄입니다.
     void fetchRecentTitles();
   } catch (_error) {
-    showToast("글 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
+    console.error('addPoem failed', _error && _error.code, _error && _error.message, _error);
+    showToast("글 저장에 실패했습니다. 상세 오류를 확인하세요.");
+    showErrorBox(`${_error?.code || ''} ${_error?.message || String(_error)}`);
   } finally {
     setSubmittingState(false);
   }
