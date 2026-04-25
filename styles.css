@@ -268,6 +268,8 @@ button:active:not(:disabled) {
 .practice-layout {
   display: grid;
   gap: 14px;
+  grid-template-rows: auto 1fr auto;
+  min-height: calc(100vh - 300px);
 }
 
 .practice-pane {
@@ -275,15 +277,22 @@ button:active:not(:disabled) {
   border-radius: 16px;
   padding: 14px;
   background: #fff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .practice-pane.current {
   background: #faf7f3;
   border-color: #d9cec2;
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
 }
 
 .current-line {
-  margin: 0 0 10px;
+  margin: 0;
   white-space: pre-wrap;
   font-size: 1.2rem;
   font-weight: 500;
@@ -296,11 +305,27 @@ button:active:not(:disabled) {
   color: #5f584f;
   font-size: 0.95rem;
   line-height: 1.6;
+  overflow-y: auto;
+}
+
+.practice-pane:first-child .lines {
+  max-height: 120px;
+}
+
+.practice-pane:last-child .lines {
+  max-height: 120px;
 }
 
 .answer-input.is-loading {
   background: #f3efea;
   cursor: wait;
+}
+
+.answer-input {
+  resize: vertical;
+  min-height: 100px;
+  flex-grow: 1;
+  font-size: 0.95rem;
 }
 
 button:disabled,
