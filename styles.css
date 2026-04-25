@@ -65,6 +65,13 @@ body {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav-admin {
+  display: flex;
+  gap: 8px;
 }
 
 .nav-link {
@@ -115,6 +122,7 @@ textarea {
   background: #fff;
   color: var(--text);
   padding: 11px 13px;
+  transition: all 0.2s ease;
 }
 
 textarea {
@@ -127,12 +135,20 @@ select {
   background: #fff;
   color: var(--text);
   padding: 9px 12px;
+  transition: all 0.2s ease;
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: #c6b7a8;
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   outline: none;
-  border-color: #c6b7a8;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(127, 103, 84, 0.12);
 }
 
@@ -148,6 +164,17 @@ button {
   border-radius: 12px;
   padding: 9px 14px;
   cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(127, 103, 84, 0.16);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn-primary {
@@ -409,4 +436,99 @@ hr {
   max-height:220px;
   overflow:auto;
   white-space:pre-wrap;
+}
+
+/* Modal styles */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: fade-in 0.2s ease;
+}
+
+.modal:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal-inner {
+  max-width: 420px;
+  width: 90%;
+  animation: slide-up 0.3s ease;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .container {
+    max-width: 100%;
+    padding: 20px;
+  }
+
+  .card {
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .poems-toolbar {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .poems-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero h1 {
+    font-size: 1.5rem;
+  }
+
+  .nav {
+    flex-direction: column;
+  }
+
+  .nav-link,
+  .btn-primary,
+  .btn-soft {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero h1 {
+    font-size: 1.3rem;
+  }
+
+  .current-line {
+    font-size: 1rem;
+  }
+
+  input,
+  textarea,
+  select {
+    padding: 9px 11px;
+  }
+
+  button {
+    padding: 8px 12px;
+    font-size: 0.95rem;
+  }
 }

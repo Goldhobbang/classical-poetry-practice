@@ -6,6 +6,7 @@ let firebaseFns = null;
 let firebaseLoaded = false;
 let firebaseAuth = null;
 let firebaseCurrentUserUid = null;
+let firebaseAuthFns = null;
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
@@ -36,6 +37,10 @@ async function ensureFirebase() {
     firebaseFns = {
       addDoc: fsModule.addDoc,
       getDocs: fsModule.getDocs,
+      getDoc: fsModule.getDoc,
+      doc: fsModule.doc,
+      deleteDoc: fsModule.deleteDoc,
+      updateDoc: fsModule.updateDoc,
       collection: fsModule.collection,
       limit: fsModule.limit,
       orderBy: fsModule.orderBy,
@@ -46,27 +51,22 @@ async function ensureFirebase() {
     };
     // Do not load analytics to avoid extra network requests and potential adblock interference
 
-    // Initialize Auth and sign in anonymously so Firestore rules with auth checks pass
+    // Initialize Auth but do NOT sign in anonymously. Admin will sign in via email/password.
     try {
       const authModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
       firebaseAuth = authModule.getAuth(firebaseApp);
-      // If no current user, sign in anonymously
-      if (!firebaseAuth.currentUser) {
-        try {
-          const cred = await authModule.signInAnonymously(firebaseAuth);
-          firebaseCurrentUserUid = cred.user.uid;
-          console.info('[Firebase] Signed in anonymously', firebaseCurrentUserUid);
-        } catch (authErr) {
-          console.error('[Firebase] Anonymous sign-in failed', authErr && authErr.code, authErr && authErr.message, authErr);
-          showErrorBox(`Anonymous sign-in failed:\n${authErr?.code || ''} ${authErr?.message || authErr}`);
-          // rethrow so callers know auth didn't complete
-          throw authErr;
-        }
-      } else {
+      // expose auth functions
+      firebaseAuthFns = {
+        signInWithEmailAndPassword: authModule.signInWithEmailAndPassword,
+        signOut: authModule.signOut,
+        createUserWithEmailAndPassword: authModule.createUserWithEmailAndPassword
+      };
+      // if a user is already signed in (unlikely on first load), set uid
+      if (firebaseAuth.currentUser) {
         firebaseCurrentUserUid = firebaseAuth.currentUser.uid;
       }
     } catch (err) {
-      console.error('[Firebase] Auth load/sign-in failed', err && err.code, err && err.message, err);
+      console.error('[Firebase] Auth load failed', err && err.code, err && err.message, err);
       throw err;
     }
 
@@ -122,6 +122,15 @@ const poemsPageInfo = document.getElementById("poemsPageInfo");
 const poemsPageSize = document.getElementById("poemsPageSize");
 const toast = document.getElementById("toast");
 
+// Admin UI elements
+const adminLoginBtn = document.getElementById("adminLoginBtn");
+const adminLogoutBtn = document.getElementById("adminLogoutBtn");
+const adminAuthModal = document.getElementById("adminAuthModal");
+const adminEmail = document.getElementById("adminEmail");
+const adminPass = document.getElementById("adminPass");
+const adminLoginSubmit = document.getElementById("adminLoginSubmit");
+const adminLoginCancel = document.getElementById("adminLoginCancel");
+
 const state = {
   poemsCache: [],
   selectedPoem: null,
@@ -136,7 +145,9 @@ const state = {
   pageCursors: {}, // page number -> lastVisible doc snapshot for that page
   pageHasMore: {}, // page number -> boolean indicating if there may be more pages after this one
   searchKeyword: "",
-  isFetchingPoems: false
+  isFetchingPoems: false,
+  // editing state for admin edits
+  editingDocId: null
 };
 
 // debounce helper
@@ -150,6 +161,7 @@ function debounce(fn, wait) {
 
 let toastTimer = null;
 let isSubmitting = false;
+let isAdmin = false;
 
 function showToast(message) {
   toast.textContent = message;
@@ -372,7 +384,7 @@ function renderRecentTitles(items) {
         </div>
         <div class="row">
           <button type="button" class="btn-soft js-load-poem">불러오기</button>
-          <button type="button" class="btn-soft js-start-practice">연습하기</button>
+          <button type="button" class="btn-primary js-start-practice">연습</button>
         </div>
       `;
       // attach data in dataset for click handlers
@@ -435,6 +447,7 @@ function renderPoemsCards(items) {
   }
   const html = items
     .map((item) => {
+      // include admin-only buttons but keep them hidden until admin logs in
       return `<article class="poem-card">
         <div class="poem-head">
           <div>
@@ -443,7 +456,9 @@ function renderPoemsCards(items) {
           </div>
           <div class="row">
             <button type="button" class="btn-soft js-toggle-detail">상세 보기</button>
-            <button type="button" class="btn-primary js-start-practice">이 글로 연습하기</button>
+            <button type="button" class="btn-primary js-start-practice">연습</button>
+            <button type="button" class="btn-soft js-edit" data-id="${item.id}" style="display:none">수정</button>
+            <button type="button" class="btn-clear js-delete" data-id="${item.id}" style="display:none">삭제</button>
           </div>
         </div>
         <div class="poem-detail" hidden>
@@ -515,6 +530,15 @@ function renderPoemsList() {
   const hasMore = !!state.pageHasMore[state.page];
   if (poemsPager) poemsPager.style.display = "flex";
   updatePager(undefined, hasMore);
+
+  // Ensure admin buttons reflect current admin status
+  if (isAdmin) {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+  } else {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  }
 }
 
 async function fetchRecentTitles() {
@@ -618,7 +642,8 @@ async function fetchPoems(page = 1) {
     // Map documents to data and de-duplicate within this page (same title+text)
     const grouped = new Map();
     snapshot.docs.forEach((docSnap) => {
-      const data = docSnap.data();
+      const raw = docSnap.data();
+      const data = Object.assign({}, raw, { id: docSnap.id });
       const key = `${data.taskTitle}::${data.originalText}`;
       if (!grouped.has(key)) {
         grouped.set(key, data);
@@ -666,6 +691,15 @@ function renderRoute() {
   if (route === "poems") {
     void fetchPoems();
   }
+
+  // Restore admin button visibility after route change
+  if (isAdmin) {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+  } else {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  }
 }
 
 savePoemBtn.addEventListener("click", async () => {
@@ -687,6 +721,30 @@ savePoemBtn.addEventListener("click", async () => {
   }
 
   setSubmittingState(true);
+    // If we're in editing mode (admin editing an existing doc), update instead of create
+    if (state.editingDocId) {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', state.editingDocId);
+        await firebaseFns.updateDoc(docRef, {
+          authorName,
+          taskTitle,
+          originalText: sourceText
+        });
+        showToast('문서가 업데이트되었습니다.');
+        // clear editing state
+        state.editingDocId = null;
+        taskTitleInput.value = taskTitle;
+        startPracticeWithPoem({ authorName, taskTitle, originalText: sourceText });
+        void fetchRecentTitles();
+        return;
+      } catch (e) {
+        console.error('update failed', e);
+        showErrorBox(`${e?.code||''} ${e?.message||String(e)}`);
+      } finally {
+        setSubmittingState(false);
+      }
+    }
   try {
     const createdPoem = await addPoemToDb({
       authorName,
@@ -859,6 +917,59 @@ poemsList.addEventListener("click", (event) => {
     const author = card.querySelector(".item-meta")?.textContent || "";
     const text = card.querySelector(".item-content")?.textContent || "";
     startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
+    return;
+  }
+
+  // Admin: edit
+  if (target.classList.contains('js-edit')) {
+    if (!isAdmin) { showToast('관리자만 수정할 수 있습니다.'); return; }
+    const id = target.dataset.id;
+    if (!id) return;
+    // load doc data into add form for editing
+    (async () => {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', id);
+        const docSnap = await firebaseFns.getDoc(docRef);
+        if (!docSnap.exists()) { showToast('문서를 찾을 수 없습니다.'); return; }
+        const data = docSnap.data();
+        authorNameInput.value = data.authorName || '';
+        taskTitleInput.value = data.taskTitle || '';
+        sourceTextInput.value = data.originalText || '';
+        state.editingDocId = id;
+        location.hash = '#/add';
+        showToast('편집 모드로 불러왔습니다. 저장하면 기존 문서가 업데이트됩니다.');
+      } catch (err) {
+        console.error('load doc for edit failed', err);
+        showErrorBox(`${err?.code||''} ${err?.message||String(err)}`);
+      }
+    })();
+    return;
+  }
+
+  // Admin: delete
+  if (target.classList.contains('js-delete')) {
+    if (!isAdmin) { showToast('관리자만 삭제할 수 있습니다.'); return; }
+    const id = target.dataset.id;
+    if (!id) return;
+    if (!confirm('정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+    (async () => {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', id);
+        await firebaseFns.deleteDoc(docRef);
+        // invalidate page caches and refetch current page
+        state.pages = {};
+        state.pageCursors = {};
+        state.pageHasMore = {};
+        void fetchPoems(state.page);
+        showToast('문서가 삭제되었습니다.');
+      } catch (err) {
+        console.error('delete failed', err);
+        showErrorBox(`${err?.code||''} ${err?.message||String(err)}`);
+      }
+    })();
+    return;
   }
 });
 
@@ -929,3 +1040,92 @@ if (!location.hash) {
     showToast(`[Firebase 로드 실패] 원인: ${e?.message || e}`);
   }
 })();
+
+// --- Admin auth UI wiring (password-only) ---
+
+// Simple password-only admin authentication
+async function adminSignIn(password) {
+  try {
+    const correctPassword = (typeof window !== 'undefined' && window.__ADMIN_PASSWORD__) ? window.__ADMIN_PASSWORD__ : null;
+    if (!correctPassword) {
+      showToast('관리자 비밀번호가 설정되지 않았습니다.');
+      showErrorBox('window.__ADMIN_PASSWORD__ is not set in config/firebase-config.js');
+      return;
+    }
+
+    // Simple password check
+    if (password !== correctPassword) {
+      showToast('비밀번호가 틀렸습니다.');
+      return;
+    }
+
+    isAdmin = true;
+    localStorage.setItem('isAdmin', 'true');
+    // reveal admin-only buttons
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+    showToast('관리자 로그인 성공');
+    if (adminAuthModal) adminAuthModal.setAttribute('hidden', 'true');
+  } catch (err) {
+    console.error('admin login failed', err);
+    showToast('관리자 로그인 실패');
+    showErrorBox(`${err?.message || String(err)}`);
+  }
+}
+
+if (adminLoginBtn) {
+  adminLoginBtn.addEventListener('click', () => {
+    if (!adminAuthModal) return;
+    adminAuthModal.removeAttribute('hidden');
+    // Only password is required now. Clear and focus password field.
+    if (adminPass) adminPass.value = '';
+    if (adminPass) adminPass.focus();
+  });
+}
+if (adminLoginCancel) {
+  adminLoginCancel.addEventListener('click', () => {
+    if (adminAuthModal) adminAuthModal.setAttribute('hidden', 'true');
+  });
+}
+if (adminLogoutBtn) {
+  adminLogoutBtn.addEventListener('click', async () => {
+    isAdmin = false;
+    localStorage.removeItem('isAdmin');
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    adminLogoutBtn.style.display = 'none';
+    showToast('관리자 로그아웃 완료');
+  });
+}
+if (adminLoginSubmit) {
+  adminLoginSubmit.addEventListener('click', async () => {
+    const pass = adminPass.value;
+    if (!pass) { showToast('비밀번호를 입력하세요.'); return; }
+    await adminSignIn(pass);
+  });
+}
+
+// By default hide admin buttons until admin logs in
+// Check localStorage to restore admin status if previously logged in
+if (localStorage.getItem('isAdmin') === 'true') {
+  isAdmin = true;
+  document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+  if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+} else {
+  document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+  if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+}
+
+// Optional: expose logout control via console for now
+window.__adminLogout = async function() {
+  if (!firebaseAuth || !firebaseAuthFns) return;
+  try {
+    await firebaseAuthFns.signOut(firebaseAuth);
+    isAdmin = false;
+    localStorage.removeItem('isAdmin');
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+    showToast('관리자 로그아웃 완료');
+  } catch(err) {
+    console.error('logout failed', err);
+  }
+};
