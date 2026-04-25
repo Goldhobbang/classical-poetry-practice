@@ -30,18 +30,18 @@ body {
 }
 
 .container {
-  max-width: 980px;
-  margin: 42px auto;
-  padding: 0 20px 80px;
+  max-width: 1100px;
+  margin: 32px auto;
+  padding: 0 20px 100px;
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 22px;
-  padding: 22px;
+  padding: 28px;
   box-shadow: 0 8px 24px rgba(48, 40, 34, 0.04);
 }
 
@@ -90,18 +90,24 @@ body {
 
 h2 {
   margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 1.4rem;
+  color: var(--text);
 }
 
 h3 {
-  margin: 0 0 10px;
-  font-size: 1rem;
+  margin: 16px 0 10px;
+  font-size: 1.05rem;
+  color: var(--text);
 }
 
 label,
 .label {
   display: block;
-  margin: 10px 0 6px;
+  margin: 12px 0 8px;
   color: #3d372f;
+  font-weight: 500;
+  font-size: 0.95rem;
 }
 
 input,
@@ -121,8 +127,9 @@ textarea {
   border-radius: 14px;
   background: #fff;
   color: var(--text);
-  padding: 11px 13px;
+  padding: 12px 14px;
   transition: all 0.2s ease;
+  font-size: 0.95rem;
 }
 
 textarea {
@@ -162,10 +169,11 @@ select:focus {
 button {
   border: 1px solid transparent;
   border-radius: 12px;
-  padding: 9px 14px;
+  padding: 10px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
   font-weight: 500;
+  font-size: 0.95rem;
 }
 
 button:hover:not(:disabled) {
@@ -207,20 +215,21 @@ button:active:not(:disabled) {
 }
 
 .progress-wrap {
-  padding: 14px 18px;
+  padding: 18px 20px;
 }
 
 .progress-head {
   display: flex;
   justify-content: space-between;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   color: var(--muted);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  font-weight: 500;
 }
 
 .progress-bar {
   width: 100%;
-  height: 10px;
+  height: 12px;
   border-radius: 999px;
   border: 1px solid #ddd7ce;
   background: #f2ede6;
@@ -258,13 +267,13 @@ button:active:not(:disabled) {
 
 .practice-layout {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .practice-pane {
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 12px;
+  padding: 14px;
   background: #fff;
 }
 
@@ -274,15 +283,19 @@ button:active:not(:disabled) {
 }
 
 .current-line {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   white-space: pre-wrap;
-  font-size: 1.15rem;
+  font-size: 1.2rem;
+  font-weight: 500;
+  line-height: 1.6;
 }
 
 .lines {
-  min-height: 52px;
+  min-height: 60px;
   white-space: pre-wrap;
   color: #5f584f;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .answer-input.is-loading {
@@ -299,88 +312,132 @@ textarea:disabled {
 .list-block,
 .poems-grid {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 #recentPoemsList {
-  max-height: 300px;
+  max-height: 400px;
   overflow: auto;
-  padding: 8px;
+  padding: 4px;
 }
 
 .list-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
   align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
+  transition: all 0.2s ease;
 }
+
+.list-item:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(127, 103, 84, 0.08);
+}
+
+.list-item > div:first-child {
+  min-width: 0;
+}
+
 .list-item button {
-  margin-left:8px;
+  margin: 0;
+  white-space: nowrap;
 }
 
 .poems-toolbar {
   display: grid;
-  grid-template-columns: auto 150px 1fr auto;
-  gap: 8px;
+  grid-template-columns: auto 140px 1fr auto;
+  gap: 10px;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .poems-toolbar label {
   margin: 0;
+  font-weight: 500;
 }
 
 .list-item,
 .poem-card {
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 12px;
+  padding: 16px;
   background: #fff;
+  transition: all 0.2s ease;
+}
+
+.poem-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 6px 16px rgba(127, 103, 84, 0.1);
 }
 
 .poem-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
   align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.poem-head > div:first-child {
+  min-width: 0;
 }
 
 .poem-detail {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid #ece8e2;
+  background: #faf7f3;
+  padding: 12px;
+  border-radius: 10px;
+  margin-left: -16px;
+  margin-right: -16px;
+  margin-bottom: -16px;
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
 .poems-grid {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
 #poemsPager {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 #poemsPageInfo {
-  min-width: 56px;
+  min-width: 60px;
   text-align: center;
   color: var(--muted);
+  font-weight: 500;
 }
 
 .item-title {
   margin: 0 0 6px;
   font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.4;
+  color: var(--text);
 }
 
 .item-meta {
   margin: 0 0 6px;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
 .item-content {
   margin: 0;
   white-space: pre-wrap;
   color: #4f4942;
+  line-height: 1.6;
+  font-size: 0.95rem;
 }
 
 hr {
@@ -479,12 +536,19 @@ hr {
 @media (max-width: 768px) {
   .container {
     max-width: 100%;
-    padding: 20px;
+    margin: 20px auto;
+    padding: 0 16px 80px;
+    gap: 16px;
   }
 
   .card {
     border-radius: 16px;
-    padding: 16px;
+    padding: 20px;
+  }
+
+  h2 {
+    font-size: 1.2rem;
+    margin-bottom: 12px;
   }
 
   .poems-toolbar {
@@ -496,39 +560,87 @@ hr {
     grid-template-columns: 1fr;
   }
 
+  .poem-head {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .poem-head .row {
+    align-self: flex-start;
+  }
+
   .hero h1 {
-    font-size: 1.5rem;
+    font-size: 1.4rem;
   }
 
   .nav {
     flex-direction: column;
+    gap: 6px;
   }
 
-  .nav-link,
-  .btn-primary,
-  .btn-soft {
+  .nav-link {
     width: 100%;
     text-align: center;
+  }
+
+  .nav-admin {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .nav-admin button {
+    flex: 1;
+  }
+
+  button {
+    padding: 9px 14px;
+    font-size: 0.9rem;
   }
 }
 
 @media (max-width: 480px) {
+  .container {
+    padding: 0 12px 60px;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
   .hero h1 {
-    font-size: 1.3rem;
+    font-size: 1.2rem;
+  }
+
+  h2 {
+    font-size: 1.1rem;
   }
 
   .current-line {
-    font-size: 1rem;
+    font-size: 1.05rem;
   }
 
   input,
   textarea,
   select {
-    padding: 9px 11px;
+    padding: 10px 12px;
+    font-size: 0.9rem;
   }
 
   button {
     padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+
+  .item-title {
     font-size: 0.95rem;
+  }
+
+  .poems-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .list-item,
+  .poem-card {
+    padding: 12px;
   }
 }

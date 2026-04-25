@@ -382,7 +382,7 @@ function renderRecentTitles(items) {
           <p class="item-title">${safeTitle}</p>
           <p class="item-meta">${safeAuthor}</p>
         </div>
-        <div class="row">
+        <div class="row" style="margin: 0;">
           <button type="button" class="btn-soft js-load-poem">불러오기</button>
           <button type="button" class="btn-primary js-start-practice">연습</button>
         </div>
@@ -454,8 +454,8 @@ function renderPoemsCards(items) {
             <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
             <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
           </div>
-          <div class="row">
-            <button type="button" class="btn-soft js-toggle-detail">상세 보기</button>
+          <div class="row" style="margin: 0; flex-wrap: nowrap;">
+            <button type="button" class="btn-soft js-toggle-detail">상세</button>
             <button type="button" class="btn-primary js-start-practice">연습</button>
             <button type="button" class="btn-soft js-edit" data-id="${item.id}" style="display:none">수정</button>
             <button type="button" class="btn-clear js-delete" data-id="${item.id}" style="display:none">삭제</button>
