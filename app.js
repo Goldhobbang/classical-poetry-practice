@@ -15,12 +15,13 @@ import {
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
 const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyBaIiI5lY_nSyk4Li1Yvju0fxPElU7mKEo",
+  authDomain: "classical-poetry-practicer.firebaseapp.com",
+  projectId: "classical-poetry-practicer",
+  storageBucket: "classical-poetry-practicer.firebasestorage.app",
+  messagingSenderId: "951378049043",
+  appId: "1:951378049043:web:b4d487ab0a4e9641a9e7e6",
+  measurementId: "G-CBG0P4VVB6"
 };
 
 const app = initializeApp(firebaseConfig);
