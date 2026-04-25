@@ -9,12 +9,13 @@ let firebaseLoaded = false;
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
 // Use external config if provided (loaded from an ignored file at runtime)
 const firebaseConfig = (typeof window !== 'undefined' && window.__FIREBASE_CONFIG__) ? window.__FIREBASE_CONFIG__ : {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyBaIiI5lY_nSyk4Li1Yvju0fxPElU7mKEo",
+  authDomain: "classical-poetry-practicer.firebaseapp.com",
+  projectId: "classical-poetry-practicer",
+  storageBucket: "classical-poetry-practicer.firebasestorage.app",
+  messagingSenderId: "951378049043",
+  appId: "1:951378049043:web:b4d487ab0a4e9641a9e7e6",
+  measurementId: "G-CBG0P4VVB6"
 };
 
 if (!firebaseConfig || !firebaseConfig.apiKey) {
@@ -41,6 +42,19 @@ async function ensureFirebase() {
       where: fsModule.where,
       startAfter: fsModule.startAfter
     };
+    // Try to initialize analytics if available (non-fatal)
+    try {
+      const analyticsModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics.js');
+      try {
+        analyticsModule.getAnalytics(firebaseApp);
+        console.info('[Firebase] Analytics initialized');
+      } catch (err) {
+        console.info('[Firebase] Analytics init skipped or failed', err);
+      }
+    } catch (err) {
+      // analytics script failed to load; ignore
+    }
+
     firebaseLoaded = true;
     console.info('[Firebase] Modules loaded');
   } catch (e) {
