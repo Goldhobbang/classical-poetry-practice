@@ -198,41 +198,37 @@ async function resolveUniqueTaskTitle(title) {
   if (!trimmed) {
     return trimmed;
   }
-  const prefixQuery = query(
-    translationsRef,
-    where("taskTitle", ">=", trimmed),
-    where("taskTitle", "<=", `${trimmed}\uf8ff`)
-  );
-  const snapshot = await getDocs(prefixQuery);
-  if (!snapshot.docs.length) {
-    return trimmed;
-  }
-
-  const usedTitles = new Set(snapshot.docs.map((docSnap) => docSnap.data().taskTitle).filter(Boolean));
-  if (!usedTitles.has(trimmed)) {
-    return trimmed;
-  }
-
-  let maxIndex = 0;
-  usedTitles.forEach((existing) => {
-    const { root, index } = parseTitle(existing);
-    if (root === trimmed && index > maxIndex) {
-      maxIndex = index;
+  // 성능 최적화: 대량 prefix 조회 대신, 후보 제목을 limit(1)로 존재 여부만 확인합니다.
+  // 보통 1~2회 쿼리에서 종료되어 add 속도가 훨씬 안정적입니다.
+  let candidate = trimmed;
+  let suffix = 0;
+  while (suffix < 500) {
+    const existsQuery = query(translationsRef, where("taskTitle", "==", candidate), limit(1));
+    const snapshot = await getDocs(existsQuery);
+    if (snapshot.empty) {
+      return candidate;
     }
-  });
-  return `${trimmed}(${maxIndex + 1})`;
+    suffix += 1;
+    candidate = `${trimmed}(${suffix})`;
+  }
+  return `${trimmed}(${Date.now()})`;
 }
 
 async function addPoemToDb(poem) {
   const taskTitle = await resolveUniqueTaskTitle(poem.taskTitle);
-  await addDoc(translationsRef, {
+  const docRef = await addDoc(translationsRef, {
     authorName: poem.authorName,
     taskTitle,
     originalText: poem.originalText,
     translatedText: "",
     createdAt: serverTimestamp()
   });
-  return taskTitle;
+  return {
+    id: docRef.id,
+    authorName: poem.authorName,
+    taskTitle,
+    originalText: poem.originalText
+  };
 }
 
 function startPracticeWithPoem(poem) {
@@ -584,14 +580,17 @@ savePoemBtn.addEventListener("click", async () => {
 
   setSubmittingState(true);
   try {
-    const resolvedTitle = await addPoemToDb({
+    const createdPoem = await addPoemToDb({
       authorName,
       taskTitle,
       originalText: sourceText
     });
-    taskTitleInput.value = resolvedTitle;
-    showToast("글이 DB에 저장되었습니다.");
-    await fetchRecentTitles();
+    // 저장 직후 로컬 상태를 먼저 확정하고 라우팅하여 레이스 컨디션을 방지합니다.
+    taskTitleInput.value = createdPoem.taskTitle;
+    startPracticeWithPoem(createdPoem);
+    showToast("글 저장 후 연습을 시작합니다.");
+    // 목록 갱신은 백그라운드로 처리하여 라우팅 지연을 줄입니다.
+    void fetchRecentTitles();
   } catch (_error) {
     showToast("글 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
   } finally {
@@ -647,6 +646,7 @@ poemsSort.addEventListener("change", () => {
   // when sort changes, we should clear cached pages and re-fetch
   state.pages = {};
   state.pageCursors = {};
+  state.pageHasMore = {};
   void fetchPoems(1);
 });
 
@@ -656,6 +656,7 @@ const debouncedSearch = debounce((ev) => {
   state.searchKeyword = v;
   state.pages = {};
   state.pageCursors = {};
+  state.pageHasMore = {};
   void fetchPoems(1);
 }, 250);
 poemsSearch.addEventListener("input", debouncedSearch);
@@ -667,6 +668,7 @@ poemsSearchResetBtn.addEventListener("click", () => {
   state.page = 1;
   state.pages = {};
   state.pageCursors = {};
+  state.pageHasMore = {};
   void fetchPoems(1);
 });
 
@@ -704,6 +706,7 @@ if (poemsPageSize) {
     state.page = 1;
     state.pages = {};
     state.pageCursors = {};
+    state.pageHasMore = {};
     void fetchPoems(1);
   });
 }
