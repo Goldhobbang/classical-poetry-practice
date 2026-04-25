@@ -126,6 +126,18 @@
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="errorBox" class="error-box" hidden>
+      <div class="error-head">
+        <strong>Firebase Error</strong>
+        <button id="closeErrorBtn" class="btn-soft">닫기</button>
+      </div>
+      <pre id="errorText" class="error-text"></pre>
+      <div class="row">
+        <button id="copyErrorBtn" class="btn-primary">오류 복사</button>
+      </div>
+    </div>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

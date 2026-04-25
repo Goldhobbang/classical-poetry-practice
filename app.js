@@ -1,20 +1,16 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  addDoc,
-  collection,
-  getDocs,
-  getFirestore,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  where,
-  startAfter
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+// Lazy-load Firebase modules to avoid blocking initial render
+let firebaseApp = null;
+let db = null;
+let translationsRef = null;
+let firebaseFns = null;
+let firebaseLoaded = false;
+let firebaseAuth = null;
+let firebaseCurrentUserUid = null;
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
-const firebaseConfig = {
+// Use external config if provided (loaded from an ignored file at runtime)
+const firebaseConfig = (typeof window !== 'undefined' && window.__FIREBASE_CONFIG__) ? window.__FIREBASE_CONFIG__ : {
   apiKey: "AIzaSyBaIiI5lY_nSyk4Li1Yvju0fxPElU7mKEo",
   authDomain: "classical-poetry-practicer.firebaseapp.com",
   projectId: "classical-poetry-practicer",
@@ -24,9 +20,68 @@ const firebaseConfig = {
   measurementId: "G-CBG0P4VVB6"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const translationsRef = collection(db, "translations");
+if (!firebaseConfig || !firebaseConfig.apiKey) {
+  console.warn('[Firebase] No firebaseConfig found on window.__FIREBASE_CONFIG__. Make sure to create config/firebase-config.js and include it before app.js.');
+}
+
+// Lazy-load firebase modules when needed to avoid blocking initial render
+async function ensureFirebase() {
+  if (firebaseLoaded) return;
+  try {
+    const appModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js');
+    const fsModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js');
+    firebaseApp = appModule.initializeApp(firebaseConfig);
+    db = fsModule.getFirestore(firebaseApp);
+    translationsRef = fsModule.collection(db, 'translations');
+    firebaseFns = {
+      addDoc: fsModule.addDoc,
+      getDocs: fsModule.getDocs,
+      collection: fsModule.collection,
+      limit: fsModule.limit,
+      orderBy: fsModule.orderBy,
+      query: fsModule.query,
+      serverTimestamp: fsModule.serverTimestamp,
+      where: fsModule.where,
+      startAfter: fsModule.startAfter
+    };
+    // Do not load analytics to avoid extra network requests and potential adblock interference
+
+    // Initialize Auth and sign in anonymously so Firestore rules with auth checks pass
+    try {
+      const authModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
+      firebaseAuth = authModule.getAuth(firebaseApp);
+      // If no current user, sign in anonymously
+      if (!firebaseAuth.currentUser) {
+        try {
+          const cred = await authModule.signInAnonymously(firebaseAuth);
+          firebaseCurrentUserUid = cred.user.uid;
+          console.info('[Firebase] Signed in anonymously', firebaseCurrentUserUid);
+        } catch (authErr) {
+          console.error('[Firebase] Anonymous sign-in failed', authErr && authErr.code, authErr && authErr.message, authErr);
+          showErrorBox(`Anonymous sign-in failed:\n${authErr?.code || ''} ${authErr?.message || authErr}`);
+          // rethrow so callers know auth didn't complete
+          throw authErr;
+        }
+      } else {
+        firebaseCurrentUserUid = firebaseAuth.currentUser.uid;
+      }
+    } catch (err) {
+      console.error('[Firebase] Auth load/sign-in failed', err && err.code, err && err.message, err);
+      throw err;
+    }
+
+    firebaseLoaded = true;
+    console.info('[Firebase] Modules loaded');
+  } catch (e) {
+    // Log detailed error info and rethrow so callers can react
+    console.error('[Firebase] Failed to load modules', e && e.code, e && e.message, e);
+    // Provide a standardized Error with code/message if possible
+    const err = e instanceof Error ? e : new Error(String(e));
+    err.code = e && e.code ? e.code : 'firebase_load_failed';
+    err.message = e && e.message ? e.message : String(e);
+    throw err;
+  }
+}
 
 const routePages = {
   add: document.getElementById("addPage"),
@@ -104,7 +159,35 @@ function showToast(message) {
   }
   toastTimer = setTimeout(() => {
     toast.classList.remove("show");
-  }, 1800);
+  }, 5000);
+}
+
+// Error UI helper: show detailed error box and allow copying
+const errorBox = document.getElementById('errorBox');
+const errorText = document.getElementById('errorText');
+const copyErrorBtn = document.getElementById('copyErrorBtn');
+const closeErrorBtn = document.getElementById('closeErrorBtn');
+
+function showErrorBox(text) {
+  if (!errorBox || !errorText) return;
+  errorText.textContent = text;
+  errorBox.removeAttribute('hidden');
+}
+
+if (copyErrorBtn) {
+  copyErrorBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(errorText.textContent);
+      showToast('오류 메시지를 복사했습니다.');
+    } catch (e) {
+      showToast('클립보드 복사에 실패했습니다.');
+    }
+  });
+}
+if (closeErrorBtn) {
+  closeErrorBtn.addEventListener('click', () => {
+    if (errorBox) errorBox.setAttribute('hidden', 'true');
+  });
 }
 
 function escapeHtml(value) {
@@ -203,10 +286,11 @@ async function resolveUniqueTaskTitle(title) {
   // 보통 1~2회 쿼리에서 종료되어 add 속도가 훨씬 안정적입니다.
   let candidate = trimmed;
   let suffix = 0;
+  await ensureFirebase();
   while (suffix < 500) {
-    const existsQuery = query(translationsRef, where("taskTitle", "==", candidate), limit(1));
-    const snapshot = await getDocs(existsQuery);
-    if (snapshot.empty) {
+    const existsQuery = firebaseFns.query(translationsRef, firebaseFns.where("taskTitle", "==", candidate), firebaseFns.limit(1));
+    const snapshot = await firebaseFns.getDocs(existsQuery);
+    if (!snapshot || snapshot.empty) {
       return candidate;
     }
     suffix += 1;
@@ -217,12 +301,15 @@ async function resolveUniqueTaskTitle(title) {
 
 async function addPoemToDb(poem) {
   const taskTitle = await resolveUniqueTaskTitle(poem.taskTitle);
-  const docRef = await addDoc(translationsRef, {
+  await ensureFirebase();
+  const ownerIdToUse = firebaseCurrentUserUid || poem.ownerId || null;
+  const docRef = await firebaseFns.addDoc(translationsRef, {
     authorName: poem.authorName,
     taskTitle,
     originalText: poem.originalText,
     translatedText: "",
-    createdAt: serverTimestamp()
+    createdAt: firebaseFns.serverTimestamp(),
+    ownerId: ownerIdToUse
   });
   return {
     id: docRef.id,
@@ -417,13 +504,17 @@ function renderPoemsList() {
 
 async function fetchRecentTitles() {
   recentPoemsList.textContent = "최근 등록 목록을 불러오는 중...";
-  const q = query(translationsRef, orderBy("createdAt", "desc"), limit(30));
+  await ensureFirebase();
+  const q = firebaseFns.query(translationsRef, firebaseFns.orderBy("createdAt", "desc"), firebaseFns.limit(30));
   try {
-    const snapshot = await getDocs(q);
+    const snapshot = await firebaseFns.getDocs(q);
     const items = snapshot.docs.map((docSnap) => docSnap.data());
     renderRecentTitles(items);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Firebase] fetchRecentTitles failed', error && error.code, error && error.message, error);
     recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
+    showErrorBox(`${error?.code || ''} ${error?.message || String(error)}`);
   }
 }
 
@@ -463,12 +554,12 @@ async function fetchPoems(page = 1) {
       const start = keyword;
       const end = keyword + "";
       if (page === 1) {
-        q = query(
+        q = firebaseFns.query(
           translationsRef,
-          orderBy("taskTitle", "asc"),
-          where("taskTitle", ">=", start),
-          where("taskTitle", "<=", end),
-          limit(pageSize)
+          firebaseFns.orderBy("taskTitle", "asc"),
+          firebaseFns.where("taskTitle", ">=", start),
+          firebaseFns.where("taskTitle", "<=", end),
+          firebaseFns.limit(pageSize)
         );
       } else {
         const prevCursor = state.pageCursors[page - 1];
@@ -477,19 +568,19 @@ async function fetchPoems(page = 1) {
           state.isFetchingPoems = false;
           return await fetchPoems(page);
         }
-        q = query(
+        q = firebaseFns.query(
           translationsRef,
-          orderBy("taskTitle", "asc"),
-          where("taskTitle", ">=", start),
-          where("taskTitle", "<=", end),
-          startAfter(prevCursor),
-          limit(pageSize)
+          firebaseFns.orderBy("taskTitle", "asc"),
+          firebaseFns.where("taskTitle", ">=", start),
+          firebaseFns.where("taskTitle", "<=", end),
+          firebaseFns.startAfter(prevCursor),
+          firebaseFns.limit(pageSize)
         );
       }
     } else {
       // Default: page-by-page using startAfter cursors with chosen sort
       if (page === 1) {
-        q = query(translationsRef, orderBy(sortField, sortDir), limit(pageSize));
+        q = firebaseFns.query(translationsRef, firebaseFns.orderBy(sortField, sortDir), firebaseFns.limit(pageSize));
       } else {
         const prevCursor = state.pageCursors[page - 1];
         if (!prevCursor) {
@@ -498,11 +589,11 @@ async function fetchPoems(page = 1) {
           state.isFetchingPoems = false;
           return await fetchPoems(page);
         }
-        q = query(translationsRef, orderBy(sortField, sortDir), startAfter(prevCursor), limit(pageSize));
+        q = firebaseFns.query(translationsRef, firebaseFns.orderBy(sortField, sortDir), firebaseFns.startAfter(prevCursor), firebaseFns.limit(pageSize));
       }
     }
 
-    const snapshot = await getDocs(q);
+    const snapshot = await firebaseFns.getDocs(q);
     if (!snapshot || !snapshot.docs) {
       poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
       state.isFetchingPoems = false;
@@ -531,8 +622,9 @@ async function fetchPoems(page = 1) {
     renderPoemsList();
 
   } catch (error) {
-    console.error("fetchPoems error", error);
+    console.error('fetchPoems error', error && error.code, error && error.message, error);
     poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
   } finally {
     state.isFetchingPoems = false;
   }
@@ -584,7 +676,8 @@ savePoemBtn.addEventListener("click", async () => {
     const createdPoem = await addPoemToDb({
       authorName,
       taskTitle,
-      originalText: sourceText
+      originalText: sourceText,
+      ownerId: firebaseCurrentUserUid
     });
     // 저장 직후 로컬 상태를 먼저 확정하고 라우팅하여 레이스 컨디션을 방지합니다.
     taskTitleInput.value = createdPoem.taskTitle;
@@ -593,7 +686,9 @@ savePoemBtn.addEventListener("click", async () => {
     // 목록 갱신은 백그라운드로 처리하여 라우팅 지연을 줄입니다.
     void fetchRecentTitles();
   } catch (_error) {
-    showToast("글 저장에 실패했습니다. Firebase 설정을 확인해주세요.");
+    console.error('addPoem failed', _error && _error.code, _error && _error.message, _error);
+    showToast("글 저장에 실패했습니다. 상세 오류를 확인하세요.");
+    showErrorBox(`${_error?.code || ''} ${_error?.message || String(_error)}`);
   } finally {
     setSubmittingState(false);
   }
@@ -754,13 +849,14 @@ poemsList.addEventListener("click", (event) => {
 
 async function testFirebaseConnection() {
   try {
-    const q = query(translationsRef, limit(1));
-    await getDocs(q);
+    await ensureFirebase();
+    const q = firebaseFns.query(translationsRef, firebaseFns.limit(1));
+    await firebaseFns.getDocs(q);
     console.info("[Firebase] 연결 성공");
     showToast("Firebase 연결 성공");
   } catch (error) {
-    console.error("[Firebase] 연결 실패", error);
-    showToast("Firebase 연결 실패");
+    console.error('[Firebase] 연결 실패', error && error.code, error && error.message, error);
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
   }
 }
 
@@ -772,4 +868,22 @@ if (!location.hash) {
 } else {
   renderRoute();
 }
-void testFirebaseConnection();
+
+// Defer Firebase initialization and data fetch to background so the initial UI shows immediately
+(async () => {
+  try {
+    await ensureFirebase();
+    // only fetch data relevant to current route (non-blocking)
+    const route = getCurrentRoute();
+    if (route === 'add') {
+      void fetchRecentTitles();
+    }
+    if (route === 'poems') {
+      void fetchPoems(1);
+    }
+    void testFirebaseConnection();
+  } catch (e) {
+    console.error('Firebase modules failed to load:', e && e.code, e && e.message, e);
+    showToast(`[Firebase 로드 실패] 원인: ${e?.message || e}`);
+  }
+})();

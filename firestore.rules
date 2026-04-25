@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Simple helper: is the request authenticated?
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Validate string length between min and max (inclusive)
+    function isValidString(val, minLen, maxLen) {
+      return val is string
+        && val.size() >= minLen
+        && val.size() <= maxLen;
+    }
+
+    // Protect the translations collection
+    match /translations/{docId} {
+
+      // Reads: only authenticated users; also prevent overly-large page requests
+      allow get: if isSignedIn();
+      allow list: if isSignedIn()
+        && (request.query.limit == null || request.query.limit <= 50);
+
+      // Creates: authenticated users only; require ownerId == request.auth.uid
+      // and validate fields and sizes. createdAt may be supplied or serverTimestamp.
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          "authorName",
+          "taskTitle",
+          "originalText",
+          "translatedText",
+          "createdAt",
+          "ownerId"
+        ])
+        // ownerId must equal the authenticated user's uid
+        && request.resource.data.ownerId == request.auth.uid
+        // field validations
+        && isValidString(request.resource.data.authorName, 1, 100)
+        && isValidString(request.resource.data.taskTitle, 1, 200)
+        && isValidString(request.resource.data.originalText, 1, 20000)
+        && (request.resource.data.translatedText is string
+            && request.resource.data.translatedText.size() <= 20000)
+        // createdAt if provided must be a timestamp not in the future
+        && (
+          !("createdAt" in request.resource.data)
+          || (request.resource.data.createdAt is timestamp
+              && request.resource.data.createdAt <= request.time)
+        );
+
+      // Updates: only the owner can update; createdAt and ownerId must not change
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        // ensure update does not add/remove keys
+        && request.resource.data.keys().hasOnly(resource.data.keys())
+        // ownerId and createdAt are immutable
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        // re-validate content fields
+        && isValidString(request.resource.data.authorName, 1, 100)
+        && isValidString(request.resource.data.taskTitle, 1, 200)
+        && isValidString(request.resource.data.originalText, 1, 20000)
+        && (request.resource.data.translatedText is string
+            && request.resource.data.translatedText.size() <= 20000);
+
+      // Deletes: only the owner can delete
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Deny everything else by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
