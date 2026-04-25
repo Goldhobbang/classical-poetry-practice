@@ -358,12 +358,27 @@ function renderRecentTitles(items) {
   let count = 0;
   items.forEach((data) => {
     const key = `${data.taskTitle}::${data.authorName}`;
-    if (!seen.has(key) && count < 5) {
+    if (!seen.has(key) && count < 10) {
       seen.add(key);
       count += 1;
       const article = document.createElement("article");
       article.className = "list-item";
-      article.innerHTML = `<p class="item-title">${escapeHtml(data.taskTitle || "(제목 없음)")}</p>`;
+      const safeTitle = escapeHtml(data.taskTitle || "(제목 없음)");
+      const safeAuthor = escapeHtml(data.authorName || "익명");
+      article.innerHTML = `
+        <div>
+          <p class="item-title">${safeTitle}</p>
+          <p class="item-meta">${safeAuthor}</p>
+        </div>
+        <div class="row">
+          <button type="button" class="btn-soft js-load-poem">불러오기</button>
+          <button type="button" class="btn-soft js-start-practice">연습하기</button>
+        </div>
+      `;
+      // attach data in dataset for click handlers
+      article.dataset.title = data.taskTitle || "";
+      article.dataset.author = data.authorName || "";
+      article.dataset.text = data.originalText || "";
       fragment.appendChild(article);
     }
   });
@@ -768,6 +783,17 @@ poemsSearchResetBtn.addEventListener("click", () => {
   void fetchPoems(1);
 });
 
+// Clear add form (discard draft)
+const clearAddBtn = document.getElementById('clearAddBtn');
+if (clearAddBtn) {
+  clearAddBtn.addEventListener('click', () => {
+    authorNameInput.value = '';
+    taskTitleInput.value = '';
+    sourceTextInput.value = '';
+    showToast('작성 중인 내용이 폐기되었습니다.');
+  });
+}
+
 // Pager events (if elements exist)
 if (poemsPrevBtn) {
   poemsPrevBtn.addEventListener("click", async () => {
@@ -811,6 +837,29 @@ poemsList.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
+  }
+
+  // handle recent list load buttons
+  const recentItem = target.closest(".list-item");
+  if (recentItem) {
+    if (target.classList.contains("js-load-poem")) {
+      const title = recentItem.dataset.title || "";
+      const author = recentItem.dataset.author || "";
+      const text = recentItem.dataset.text || "";
+      // load into add form
+      authorNameInput.value = author;
+      taskTitleInput.value = title;
+      sourceTextInput.value = text;
+      showToast('원문을 불러왔습니다.');
+      return;
+    }
+    if (target.classList.contains("js-start-practice")) {
+      const title = recentItem.dataset.title || "";
+      const author = recentItem.dataset.author || "";
+      const text = recentItem.dataset.text || "";
+      startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
+      return;
+    }
   }
 
   const card = target.closest(".poem-card");
