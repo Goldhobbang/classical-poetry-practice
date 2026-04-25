@@ -42,24 +42,18 @@ async function ensureFirebase() {
       where: fsModule.where,
       startAfter: fsModule.startAfter
     };
-    // Try to initialize analytics if available (non-fatal)
-    try {
-      const analyticsModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics.js');
-      try {
-        analyticsModule.getAnalytics(firebaseApp);
-        console.info('[Firebase] Analytics initialized');
-      } catch (err) {
-        console.info('[Firebase] Analytics init skipped or failed', err);
-      }
-    } catch (err) {
-      // analytics script failed to load; ignore
-    }
+    // Do not load analytics to avoid extra network requests and potential adblock interference
 
     firebaseLoaded = true;
     console.info('[Firebase] Modules loaded');
   } catch (e) {
-    console.error('[Firebase] Failed to load modules', e);
-    throw e;
+    // Log detailed error info and rethrow so callers can react
+    console.error('[Firebase] Failed to load modules', e && e.code, e && e.message, e);
+    // Provide a standardized Error with code/message if possible
+    const err = e instanceof Error ? e : new Error(String(e));
+    err.code = e && e.code ? e.code : 'firebase_load_failed';
+    err.message = e && e.message ? e.message : String(e);
+    throw err;
   }
 }
 
@@ -461,8 +455,10 @@ async function fetchRecentTitles() {
     const snapshot = await firebaseFns.getDocs(q);
     const items = snapshot.docs.map((docSnap) => docSnap.data());
     renderRecentTitles(items);
-  } catch (_error) {
+  } catch (error) {
+    console.error('[Firebase] fetchRecentTitles failed', error && error.code, error && error.message, error);
     recentPoemsList.textContent = "최근 등록 목록을 불러오지 못했습니다.";
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
   }
 }
 
@@ -570,8 +566,9 @@ async function fetchPoems(page = 1) {
     renderPoemsList();
 
   } catch (error) {
-    console.error("fetchPoems error", error);
+    console.error('fetchPoems error', error && error.code, error && error.message, error);
     poemsList.textContent = "원문 목록을 불러오지 못했습니다.";
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
   } finally {
     state.isFetchingPoems = false;
   }
@@ -799,8 +796,8 @@ async function testFirebaseConnection() {
     console.info("[Firebase] 연결 성공");
     showToast("Firebase 연결 성공");
   } catch (error) {
-    console.error("[Firebase] 연결 실패", error);
-    showToast("Firebase 연결 실패");
+    console.error('[Firebase] 연결 실패', error && error.code, error && error.message, error);
+    showToast(`[Firebase 연결 실패] 원인: ${error?.message || error}`);
   }
 }
 
@@ -827,6 +824,7 @@ if (!location.hash) {
     }
     void testFirebaseConnection();
   } catch (e) {
-    console.warn('Firebase modules failed to load:', e);
+    console.error('Firebase modules failed to load:', e && e.code, e && e.message, e);
+    showToast(`[Firebase 로드 실패] 원인: ${e?.message || e}`);
   }
 })();
