@@ -22,7 +22,9 @@ const firebaseConfig = (typeof window !== 'undefined' && window.__FIREBASE_CONFI
 };
 
 if (!firebaseConfig || !firebaseConfig.apiKey) {
-  console.warn('[Firebase] No firebaseConfig found on window.__FIREBASE_CONFIG__. Make sure to create config/firebase-config.js and include it before app.js.');
+  // Reduce console leakage; show a user-facing error box and minimal console info
+  try { showErrorBox('[Firebase] Firebase 설정이 누락되었습니다. config/firebase-config.js를 만들고 포함하세요.'); } catch(e) { /* showErrorBox may not be available during early load */ }
+  console.info('[Firebase] firebaseConfig missing — falling back to embedded config');
 }
 
 // Lazy-load firebase modules when needed to avoid blocking initial render
@@ -126,10 +128,28 @@ const toast = document.getElementById("toast");
 const adminLoginBtn = document.getElementById("adminLoginBtn");
 const adminLogoutBtn = document.getElementById("adminLogoutBtn");
 const adminAuthModal = document.getElementById("adminAuthModal");
-const adminEmail = document.getElementById("adminEmail");
+const adminEmail = document.getElementById("adminEmail") || null; // optional field
 const adminPass = document.getElementById("adminPass");
 const adminLoginSubmit = document.getElementById("adminLoginSubmit");
 const adminLoginCancel = document.getElementById("adminLoginCancel");
+// Admin session expiry (ms) — keep short for safety; user wanted minimal behavior changes, so default to 24h
+const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+function setAdminSession(flag) {
+  if (flag) {
+    localStorage.setItem('isAdmin', 'true');
+    localStorage.setItem('isAdminAt', String(Date.now()));
+  } else {
+    localStorage.removeItem('isAdmin');
+    localStorage.removeItem('isAdminAt');
+  }
+}
+function isAdminSessionValid() {
+  const v = localStorage.getItem('isAdmin');
+  const at = Number(localStorage.getItem('isAdminAt') || '0');
+  if (v !== 'true' || !at) return false;
+  if (Date.now() - at > ADMIN_SESSION_TTL_MS) return false;
+  return true;
+}
 
 const state = {
   poemsCache: [],
@@ -157,6 +177,17 @@ function debounce(fn, wait) {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => fn.apply(this, args), wait);
   };
+}
+
+// Wait helper for concurrent fetch guard
+async function waitForFetchComplete(timeout = 10000) {
+  const start = Date.now();
+  while (state.isFetchingPoems) {
+    if (Date.now() - start > timeout) break;
+    // small sleep
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 let toastTimer = null;
@@ -557,7 +588,17 @@ async function fetchRecentTitles() {
 
 // Server-side paginated fetch. Call with fetchPoems(page = 1)
 async function fetchPoems(page = 1) {
-  if (state.isFetchingPoems) return;
+  // If a fetch is already in progress, wait for it to complete to avoid reentrancy issues
+  if (state.isFetchingPoems) {
+    await waitForFetchComplete();
+    // If the requested page got cached while we waited, render and return
+    if (state.pages[page]) {
+      state.page = page;
+      renderPoemsList();
+      return;
+    }
+    // otherwise continue to attempt fetching
+  }
   state.isFetchingPoems = true;
   poemsList.textContent = "원문 목록을 불러오는 중...";
   const pageSize = Number(poemsPageSize?.value || state.pageSize) || state.pageSize;
@@ -700,7 +741,7 @@ function renderRoute() {
   }
 }
 
-savePoemBtn.addEventListener("click", async () => {
+if (savePoemBtn) savePoemBtn.addEventListener("click", async () => {
   const authorName = authorNameInput.value.trim();
   const taskTitle = taskTitleInput.value.trim();
   const sourceText = sourceTextInput.value.trim();
@@ -765,7 +806,7 @@ savePoemBtn.addEventListener("click", async () => {
   }
 });
 
-startPracticeBtn.addEventListener("click", () => {
+if (startPracticeBtn) startPracticeBtn.addEventListener("click", () => {
   const authorName = authorNameInput.value.trim();
   const taskTitle = taskTitleInput.value.trim();
   const sourceText = sourceTextInput.value.trim();
@@ -780,22 +821,22 @@ startPracticeBtn.addEventListener("click", () => {
   });
 });
 
-goPoemsBtn.addEventListener("click", () => {
+if (goPoemsBtn) goPoemsBtn.addEventListener("click", () => {
   location.hash = "#/poems";
 });
 
-nextLineBtn.addEventListener("click", () => {
+if (nextLineBtn) nextLineBtn.addEventListener("click", () => {
   saveCurrentSentence();
 });
 
-answerInput.addEventListener("keydown", (event) => {
+if (answerInput) answerInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     saveCurrentSentence();
   }
 });
 
-copyResultBtn.addEventListener("click", async () => {
+if (copyResultBtn) copyResultBtn.addEventListener("click", async () => {
   if (!resultOutput.value.trim()) {
     showToast("복사할 내용이 없습니다.");
     return;
@@ -1058,7 +1099,7 @@ async function adminSignIn(password) {
     }
 
     isAdmin = true;
-    localStorage.setItem('isAdmin', 'true');
+    setAdminSession(true);
     // reveal admin-only buttons
     document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
     if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
@@ -1088,9 +1129,9 @@ if (adminLoginCancel) {
 if (adminLogoutBtn) {
   adminLogoutBtn.addEventListener('click', async () => {
     isAdmin = false;
-    localStorage.removeItem('isAdmin');
+    setAdminSession(false);
     document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
-    adminLogoutBtn.style.display = 'none';
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
     showToast('관리자 로그아웃 완료');
   });
 }
@@ -1103,27 +1144,34 @@ if (adminLoginSubmit) {
 }
 
 // By default hide admin buttons until admin logs in
-// Check localStorage to restore admin status if previously logged in
-if (localStorage.getItem('isAdmin') === 'true') {
+// Restore admin status from localStorage with expiry check
+if (isAdminSessionValid()) {
   isAdmin = true;
   document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
   if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
 } else {
+  isAdmin = false;
   document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
   if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  setAdminSession(false);
 }
 
-// Optional: expose logout control via console for now
-window.__adminLogout = async function() {
-  if (!firebaseAuth || !firebaseAuthFns) return;
-  try {
-    await firebaseAuthFns.signOut(firebaseAuth);
-    isAdmin = false;
-    localStorage.removeItem('isAdmin');
-    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
-    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
-    showToast('관리자 로그아웃 완료');
-  } catch(err) {
-    console.error('logout failed', err);
-  }
-};
+// Optional: expose logout control via console for now (non-enumerable)
+Object.defineProperty(window, '__adminLogout', {
+  value: async function() {
+    if (!firebaseAuth || !firebaseAuthFns) return;
+    try {
+      await firebaseAuthFns.signOut(firebaseAuth);
+      isAdmin = false;
+      localStorage.removeItem('isAdmin');
+      document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+      if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+      showToast('관리자 로그아웃 완료');
+    } catch(err) {
+      console.error('logout failed', err && err.message ? err.message : err);
+    }
+  },
+  writable: false,
+  configurable: true,
+  enumerable: false
+});
