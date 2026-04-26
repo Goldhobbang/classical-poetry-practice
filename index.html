@@ -16,10 +16,14 @@
       </header>
 
       <nav class="nav card" aria-label="메인 메뉴">
-        <a class="nav-link" href="#/add">문장 추가</a>
+        <a class="nav-link" href="#/add">추가</a>
         <a class="nav-link" href="#/practice">연습</a>
         <a class="nav-link" href="#/result">결과</a>
-        <a class="nav-link" href="#/poems">원문 목록</a>
+        <a class="nav-link" href="#/poems">목록</a>
+        <div class="nav-admin" style="margin-left:auto; display:flex; gap:6px;">
+          <button id="adminLoginBtn" class="btn-soft">관리자 로그인</button>
+          <button id="adminLogoutBtn" class="btn-clear" style="display:none;">로그아웃</button>
+        </div>
       </nav>
 
       <div class="progress-wrap card">
@@ -45,9 +49,10 @@
         <textarea id="sourceText" rows="10" placeholder="원문 전체를 붙여넣으세요."></textarea>
 
         <div class="row">
-          <button id="savePoemBtn" class="btn-primary">글 추가</button>
-          <button id="startPracticeBtn" class="btn-soft">이 글로 연습 시작</button>
-          <button id="goPoemsBtn" class="btn-soft">전체 원문 보기</button>
+          <button id="savePoemBtn" class="btn-primary">추가</button>
+          <button id="startPracticeBtn" class="btn-secondary">연습</button>
+          <button id="goPoemsBtn" class="btn-soft">목록</button>
+          <button id="clearAddBtn" class="btn-clear">폐기</button>
         </div>
 
         <hr />
@@ -83,7 +88,7 @@
         </div>
 
         <div class="row">
-          <button id="nextLineBtn" class="btn-primary">저장 후 다음</button>
+          <button id="nextLineBtn" class="btn-primary">다음</button>
         </div>
       </section>
 
@@ -91,7 +96,7 @@
         <h2>연습 결과</h2>
         <textarea id="resultOutput" rows="12" readonly placeholder="연습이 완료되면 결과가 여기에 표시됩니다."></textarea>
         <div class="row">
-          <button id="copyResultBtn" class="btn-primary">복사하기</button>
+          <button id="copyResultBtn" class="btn-primary">복사</button>
         </div>
       </section>
 
@@ -138,6 +143,20 @@
       </div>
     </div>
 
+    <!-- 관리자 로그인 모달 -->
+    <div id="adminAuthModal" class="modal" hidden>
+      <div class="modal-inner card">
+        <h3>관리자 로그인</h3>
+        <label for="adminPass">비밀번호</label>
+        <input id="adminPass" type="password" />
+        <div class="row" style="margin-top:8px;">
+          <button id="adminLoginSubmit" class="btn-primary">로그인</button>
+          <button id="adminLoginCancel" class="btn-soft">취소</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./config/firebase-config.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

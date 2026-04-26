@@ -6,6 +6,7 @@ let firebaseFns = null;
 let firebaseLoaded = false;
 let firebaseAuth = null;
 let firebaseCurrentUserUid = null;
+let firebaseAuthFns = null;
 
 // 🚨 중요: 여기에 Firebase 콘솔에서 복사한 본인의 설정값을 입력하세요.
 // apiKey/authDomain/projectId/storageBucket/messagingSenderId/appId 값을 모두 본인 프로젝트 값으로 채워주세요.
@@ -21,7 +22,9 @@ const firebaseConfig = (typeof window !== 'undefined' && window.__FIREBASE_CONFI
 };
 
 if (!firebaseConfig || !firebaseConfig.apiKey) {
-  console.warn('[Firebase] No firebaseConfig found on window.__FIREBASE_CONFIG__. Make sure to create config/firebase-config.js and include it before app.js.');
+  // Reduce console leakage; show a user-facing error box and minimal console info
+  try { showErrorBox('[Firebase] Firebase 설정이 누락되었습니다. config/firebase-config.js를 만들고 포함하세요.'); } catch(e) { /* showErrorBox may not be available during early load */ }
+  console.info('[Firebase] firebaseConfig missing — falling back to embedded config');
 }
 
 // Lazy-load firebase modules when needed to avoid blocking initial render
@@ -36,6 +39,10 @@ async function ensureFirebase() {
     firebaseFns = {
       addDoc: fsModule.addDoc,
       getDocs: fsModule.getDocs,
+      getDoc: fsModule.getDoc,
+      doc: fsModule.doc,
+      deleteDoc: fsModule.deleteDoc,
+      updateDoc: fsModule.updateDoc,
       collection: fsModule.collection,
       limit: fsModule.limit,
       orderBy: fsModule.orderBy,
@@ -46,27 +53,22 @@ async function ensureFirebase() {
     };
     // Do not load analytics to avoid extra network requests and potential adblock interference
 
-    // Initialize Auth and sign in anonymously so Firestore rules with auth checks pass
+    // Initialize Auth but do NOT sign in anonymously. Admin will sign in via email/password.
     try {
       const authModule = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js');
       firebaseAuth = authModule.getAuth(firebaseApp);
-      // If no current user, sign in anonymously
-      if (!firebaseAuth.currentUser) {
-        try {
-          const cred = await authModule.signInAnonymously(firebaseAuth);
-          firebaseCurrentUserUid = cred.user.uid;
-          console.info('[Firebase] Signed in anonymously', firebaseCurrentUserUid);
-        } catch (authErr) {
-          console.error('[Firebase] Anonymous sign-in failed', authErr && authErr.code, authErr && authErr.message, authErr);
-          showErrorBox(`Anonymous sign-in failed:\n${authErr?.code || ''} ${authErr?.message || authErr}`);
-          // rethrow so callers know auth didn't complete
-          throw authErr;
-        }
-      } else {
+      // expose auth functions
+      firebaseAuthFns = {
+        signInWithEmailAndPassword: authModule.signInWithEmailAndPassword,
+        signOut: authModule.signOut,
+        createUserWithEmailAndPassword: authModule.createUserWithEmailAndPassword
+      };
+      // if a user is already signed in (unlikely on first load), set uid
+      if (firebaseAuth.currentUser) {
         firebaseCurrentUserUid = firebaseAuth.currentUser.uid;
       }
     } catch (err) {
-      console.error('[Firebase] Auth load/sign-in failed', err && err.code, err && err.message, err);
+      console.error('[Firebase] Auth load failed', err && err.code, err && err.message, err);
       throw err;
     }
 
@@ -122,6 +124,33 @@ const poemsPageInfo = document.getElementById("poemsPageInfo");
 const poemsPageSize = document.getElementById("poemsPageSize");
 const toast = document.getElementById("toast");
 
+// Admin UI elements
+const adminLoginBtn = document.getElementById("adminLoginBtn");
+const adminLogoutBtn = document.getElementById("adminLogoutBtn");
+const adminAuthModal = document.getElementById("adminAuthModal");
+const adminEmail = document.getElementById("adminEmail") || null; // optional field
+const adminPass = document.getElementById("adminPass");
+const adminLoginSubmit = document.getElementById("adminLoginSubmit");
+const adminLoginCancel = document.getElementById("adminLoginCancel");
+// Admin session expiry (ms) — keep short for safety; user wanted minimal behavior changes, so default to 24h
+const ADMIN_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+function setAdminSession(flag) {
+  if (flag) {
+    localStorage.setItem('isAdmin', 'true');
+    localStorage.setItem('isAdminAt', String(Date.now()));
+  } else {
+    localStorage.removeItem('isAdmin');
+    localStorage.removeItem('isAdminAt');
+  }
+}
+function isAdminSessionValid() {
+  const v = localStorage.getItem('isAdmin');
+  const at = Number(localStorage.getItem('isAdminAt') || '0');
+  if (v !== 'true' || !at) return false;
+  if (Date.now() - at > ADMIN_SESSION_TTL_MS) return false;
+  return true;
+}
+
 const state = {
   poemsCache: [],
   selectedPoem: null,
@@ -136,7 +165,9 @@ const state = {
   pageCursors: {}, // page number -> lastVisible doc snapshot for that page
   pageHasMore: {}, // page number -> boolean indicating if there may be more pages after this one
   searchKeyword: "",
-  isFetchingPoems: false
+  isFetchingPoems: false,
+  // editing state for admin edits
+  editingDocId: null
 };
 
 // debounce helper
@@ -148,8 +179,20 @@ function debounce(fn, wait) {
   };
 }
 
+// Wait helper for concurrent fetch guard
+async function waitForFetchComplete(timeout = 10000) {
+  const start = Date.now();
+  while (state.isFetchingPoems) {
+    if (Date.now() - start > timeout) break;
+    // small sleep
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 let toastTimer = null;
 let isSubmitting = false;
+let isAdmin = false;
 
 function showToast(message) {
   toast.textContent = message;
@@ -358,12 +401,27 @@ function renderRecentTitles(items) {
   let count = 0;
   items.forEach((data) => {
     const key = `${data.taskTitle}::${data.authorName}`;
-    if (!seen.has(key) && count < 5) {
+    if (!seen.has(key) && count < 10) {
       seen.add(key);
       count += 1;
       const article = document.createElement("article");
       article.className = "list-item";
-      article.innerHTML = `<p class="item-title">${escapeHtml(data.taskTitle || "(제목 없음)")}</p>`;
+      const safeTitle = escapeHtml(data.taskTitle || "(제목 없음)");
+      const safeAuthor = escapeHtml(data.authorName || "익명");
+      article.innerHTML = `
+        <div class="poem-info">
+          <p class="item-title">${safeTitle}</p>
+          <p class="item-meta">${safeAuthor}</p>
+        </div>
+        <div class="row" style="margin: 0; margin-top: 8px;">
+          <button type="button" class="btn-soft js-load-poem">불러오기</button>
+          <button type="button" class="btn-primary js-start-practice">연습</button>
+        </div>
+      `;
+      // attach data in dataset for click handlers
+      article.dataset.title = data.taskTitle || "";
+      article.dataset.author = data.authorName || "";
+      article.dataset.text = data.originalText || "";
       fragment.appendChild(article);
     }
   });
@@ -420,16 +478,17 @@ function renderPoemsCards(items) {
   }
   const html = items
     .map((item) => {
+      // include admin-only buttons but keep them hidden until admin logs in
       return `<article class="poem-card">
-        <div class="poem-head">
-          <div>
-            <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
-            <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
-          </div>
-          <div class="row">
-            <button type="button" class="btn-soft js-toggle-detail">상세 보기</button>
-            <button type="button" class="btn-primary js-start-practice">이 글로 연습하기</button>
-          </div>
+        <div class="poem-info">
+          <p class="item-title">${escapeHtml(item.taskTitle || "(제목 없음)")}</p>
+          <p class="item-meta">${escapeHtml(item.authorName || "익명")}</p>
+        </div>
+        <div class="poem-actions">
+          <button type="button" class="btn-soft js-toggle-detail">상세</button>
+          <button type="button" class="btn-primary js-start-practice">연습</button>
+          <button type="button" class="btn-soft js-edit" data-id="${item.id}" style="display:none">수정</button>
+          <button type="button" class="btn-clear js-delete" data-id="${item.id}" style="display:none">삭제</button>
         </div>
         <div class="poem-detail" hidden>
           <p class="item-content">${escapeHtml(item.originalText || "(원문 없음)")}</p>
@@ -500,6 +559,15 @@ function renderPoemsList() {
   const hasMore = !!state.pageHasMore[state.page];
   if (poemsPager) poemsPager.style.display = "flex";
   updatePager(undefined, hasMore);
+
+  // Ensure admin buttons reflect current admin status
+  if (isAdmin) {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+  } else {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  }
 }
 
 async function fetchRecentTitles() {
@@ -520,7 +588,17 @@ async function fetchRecentTitles() {
 
 // Server-side paginated fetch. Call with fetchPoems(page = 1)
 async function fetchPoems(page = 1) {
-  if (state.isFetchingPoems) return;
+  // If a fetch is already in progress, wait for it to complete to avoid reentrancy issues
+  if (state.isFetchingPoems) {
+    await waitForFetchComplete();
+    // If the requested page got cached while we waited, render and return
+    if (state.pages[page]) {
+      state.page = page;
+      renderPoemsList();
+      return;
+    }
+    // otherwise continue to attempt fetching
+  }
   state.isFetchingPoems = true;
   poemsList.textContent = "원문 목록을 불러오는 중...";
   const pageSize = Number(poemsPageSize?.value || state.pageSize) || state.pageSize;
@@ -603,7 +681,8 @@ async function fetchPoems(page = 1) {
     // Map documents to data and de-duplicate within this page (same title+text)
     const grouped = new Map();
     snapshot.docs.forEach((docSnap) => {
-      const data = docSnap.data();
+      const raw = docSnap.data();
+      const data = Object.assign({}, raw, { id: docSnap.id });
       const key = `${data.taskTitle}::${data.originalText}`;
       if (!grouped.has(key)) {
         grouped.set(key, data);
@@ -651,9 +730,18 @@ function renderRoute() {
   if (route === "poems") {
     void fetchPoems();
   }
+
+  // Restore admin button visibility after route change
+  if (isAdmin) {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+  } else {
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  }
 }
 
-savePoemBtn.addEventListener("click", async () => {
+if (savePoemBtn) savePoemBtn.addEventListener("click", async () => {
   const authorName = authorNameInput.value.trim();
   const taskTitle = taskTitleInput.value.trim();
   const sourceText = sourceTextInput.value.trim();
@@ -672,6 +760,30 @@ savePoemBtn.addEventListener("click", async () => {
   }
 
   setSubmittingState(true);
+    // If we're in editing mode (admin editing an existing doc), update instead of create
+    if (state.editingDocId) {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', state.editingDocId);
+        await firebaseFns.updateDoc(docRef, {
+          authorName,
+          taskTitle,
+          originalText: sourceText
+        });
+        showToast('문서가 업데이트되었습니다.');
+        // clear editing state
+        state.editingDocId = null;
+        taskTitleInput.value = taskTitle;
+        startPracticeWithPoem({ authorName, taskTitle, originalText: sourceText });
+        void fetchRecentTitles();
+        return;
+      } catch (e) {
+        console.error('update failed', e);
+        showErrorBox(`${e?.code||''} ${e?.message||String(e)}`);
+      } finally {
+        setSubmittingState(false);
+      }
+    }
   try {
     const createdPoem = await addPoemToDb({
       authorName,
@@ -694,7 +806,7 @@ savePoemBtn.addEventListener("click", async () => {
   }
 });
 
-startPracticeBtn.addEventListener("click", () => {
+if (startPracticeBtn) startPracticeBtn.addEventListener("click", () => {
   const authorName = authorNameInput.value.trim();
   const taskTitle = taskTitleInput.value.trim();
   const sourceText = sourceTextInput.value.trim();
@@ -709,22 +821,22 @@ startPracticeBtn.addEventListener("click", () => {
   });
 });
 
-goPoemsBtn.addEventListener("click", () => {
+if (goPoemsBtn) goPoemsBtn.addEventListener("click", () => {
   location.hash = "#/poems";
 });
 
-nextLineBtn.addEventListener("click", () => {
+if (nextLineBtn) nextLineBtn.addEventListener("click", () => {
   saveCurrentSentence();
 });
 
-answerInput.addEventListener("keydown", (event) => {
+if (answerInput) answerInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     saveCurrentSentence();
   }
 });
 
-copyResultBtn.addEventListener("click", async () => {
+if (copyResultBtn) copyResultBtn.addEventListener("click", async () => {
   if (!resultOutput.value.trim()) {
     showToast("복사할 내용이 없습니다.");
     return;
@@ -768,6 +880,17 @@ poemsSearchResetBtn.addEventListener("click", () => {
   void fetchPoems(1);
 });
 
+// Clear add form (discard draft)
+const clearAddBtn = document.getElementById('clearAddBtn');
+if (clearAddBtn) {
+  clearAddBtn.addEventListener('click', () => {
+    authorNameInput.value = '';
+    taskTitleInput.value = '';
+    sourceTextInput.value = '';
+    showToast('작성 중인 내용이 폐기되었습니다.');
+  });
+}
+
 // Pager events (if elements exist)
 if (poemsPrevBtn) {
   poemsPrevBtn.addEventListener("click", async () => {
@@ -807,21 +930,14 @@ if (poemsPageSize) {
   });
 }
 
+// Handle clicks in poems list (cards)
 poemsList.addEventListener("click", (event) => {
   const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-
+  if (!(target instanceof HTMLElement)) return;
   const card = target.closest(".poem-card");
-  if (!(card instanceof HTMLElement)) {
-    return;
-  }
-
+  if (!(card instanceof HTMLElement)) return;
   const detail = card.querySelector(".poem-detail");
-  if (!(detail instanceof HTMLElement)) {
-    return;
-  }
+  if (!(detail instanceof HTMLElement)) return;
 
   if (target.classList.contains("js-toggle-detail")) {
     const isHidden = detail.hasAttribute("hidden");
@@ -839,13 +955,89 @@ poemsList.addEventListener("click", (event) => {
     const title = card.querySelector(".item-title")?.textContent || "";
     const author = card.querySelector(".item-meta")?.textContent || "";
     const text = card.querySelector(".item-content")?.textContent || "";
-    startPracticeWithPoem({
-      taskTitle: title,
-      authorName: author,
-      originalText: text
-    });
+    startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
+    return;
+  }
+
+  // Admin: edit
+  if (target.classList.contains('js-edit')) {
+    if (!isAdmin) { showToast('관리자만 수정할 수 있습니다.'); return; }
+    const id = target.dataset.id;
+    if (!id) return;
+    // load doc data into add form for editing
+    (async () => {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', id);
+        const docSnap = await firebaseFns.getDoc(docRef);
+        if (!docSnap.exists()) { showToast('문서를 찾을 수 없습니다.'); return; }
+        const data = docSnap.data();
+        authorNameInput.value = data.authorName || '';
+        taskTitleInput.value = data.taskTitle || '';
+        sourceTextInput.value = data.originalText || '';
+        state.editingDocId = id;
+        location.hash = '#/add';
+        showToast('편집 모드로 불러왔습니다. 저장하면 기존 문서가 업데이트됩니다.');
+      } catch (err) {
+        console.error('load doc for edit failed', err);
+        showErrorBox(`${err?.code||''} ${err?.message||String(err)}`);
+      }
+    })();
+    return;
+  }
+
+  // Admin: delete
+  if (target.classList.contains('js-delete')) {
+    if (!isAdmin) { showToast('관리자만 삭제할 수 있습니다.'); return; }
+    const id = target.dataset.id;
+    if (!id) return;
+    if (!confirm('정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
+    (async () => {
+      try {
+        await ensureFirebase();
+        const docRef = firebaseFns.doc(db, 'translations', id);
+        await firebaseFns.deleteDoc(docRef);
+        // invalidate page caches and refetch current page
+        state.pages = {};
+        state.pageCursors = {};
+        state.pageHasMore = {};
+        void fetchPoems(state.page);
+        showToast('문서가 삭제되었습니다.');
+      } catch (err) {
+        console.error('delete failed', err);
+        showErrorBox(`${err?.code||''} ${err?.message||String(err)}`);
+      }
+    })();
+    return;
   }
 });
+
+// Handle recent list buttons (load + practice)
+if (recentPoemsList) {
+  recentPoemsList.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const recentItem = target.closest('.list-item');
+    if (!recentItem) return;
+    if (target.classList.contains('js-load-poem')) {
+      const title = recentItem.dataset.title || '';
+      const author = recentItem.dataset.author || '';
+      const text = recentItem.dataset.text || '';
+      authorNameInput.value = author;
+      taskTitleInput.value = title;
+      sourceTextInput.value = text;
+      showToast('원문을 불러왔습니다.');
+      return;
+    }
+    if (target.classList.contains('js-start-practice')) {
+      const title = recentItem.dataset.title || '';
+      const author = recentItem.dataset.author || '';
+      const text = recentItem.dataset.text || '';
+      startPracticeWithPoem({ taskTitle: title, authorName: author, originalText: text });
+      return;
+    }
+  });
+}
 
 async function testFirebaseConnection() {
   try {
@@ -887,3 +1079,99 @@ if (!location.hash) {
     showToast(`[Firebase 로드 실패] 원인: ${e?.message || e}`);
   }
 })();
+
+// --- Admin auth UI wiring (password-only) ---
+
+// Simple password-only admin authentication
+async function adminSignIn(password) {
+  try {
+    const correctPassword = (typeof window !== 'undefined' && window.__ADMIN_PASSWORD__) ? window.__ADMIN_PASSWORD__ : null;
+    if (!correctPassword) {
+      showToast('관리자 비밀번호가 설정되지 않았습니다.');
+      showErrorBox('window.__ADMIN_PASSWORD__ is not set in config/firebase-config.js');
+      return;
+    }
+
+    // Simple password check
+    if (password !== correctPassword) {
+      showToast('비밀번호가 틀렸습니다.');
+      return;
+    }
+
+    isAdmin = true;
+    setAdminSession(true);
+    // reveal admin-only buttons
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+    showToast('관리자 로그인 성공');
+    if (adminAuthModal) adminAuthModal.setAttribute('hidden', 'true');
+  } catch (err) {
+    console.error('admin login failed', err);
+    showToast('관리자 로그인 실패');
+    showErrorBox(`${err?.message || String(err)}`);
+  }
+}
+
+if (adminLoginBtn) {
+  adminLoginBtn.addEventListener('click', () => {
+    if (!adminAuthModal) return;
+    adminAuthModal.removeAttribute('hidden');
+    // Only password is required now. Clear and focus password field.
+    if (adminPass) adminPass.value = '';
+    if (adminPass) adminPass.focus();
+  });
+}
+if (adminLoginCancel) {
+  adminLoginCancel.addEventListener('click', () => {
+    if (adminAuthModal) adminAuthModal.setAttribute('hidden', 'true');
+  });
+}
+if (adminLogoutBtn) {
+  adminLogoutBtn.addEventListener('click', async () => {
+    isAdmin = false;
+    setAdminSession(false);
+    document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+    if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+    showToast('관리자 로그아웃 완료');
+  });
+}
+if (adminLoginSubmit) {
+  adminLoginSubmit.addEventListener('click', async () => {
+    const pass = adminPass.value;
+    if (!pass) { showToast('비밀번호를 입력하세요.'); return; }
+    await adminSignIn(pass);
+  });
+}
+
+// By default hide admin buttons until admin logs in
+// Restore admin status from localStorage with expiry check
+if (isAdminSessionValid()) {
+  isAdmin = true;
+  document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'inline-block');
+  if (adminLogoutBtn) adminLogoutBtn.style.display = 'inline-block';
+} else {
+  isAdmin = false;
+  document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+  if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+  setAdminSession(false);
+}
+
+// Optional: expose logout control via console for now (non-enumerable)
+Object.defineProperty(window, '__adminLogout', {
+  value: async function() {
+    if (!firebaseAuth || !firebaseAuthFns) return;
+    try {
+      await firebaseAuthFns.signOut(firebaseAuth);
+      isAdmin = false;
+      localStorage.removeItem('isAdmin');
+      document.querySelectorAll('.js-edit, .js-delete').forEach((btn) => btn.style.display = 'none');
+      if (adminLogoutBtn) adminLogoutBtn.style.display = 'none';
+      showToast('관리자 로그아웃 완료');
+    } catch(err) {
+      console.error('logout failed', err && err.message ? err.message : err);
+    }
+  },
+  writable: false,
+  configurable: true,
+  enumerable: false
+});
