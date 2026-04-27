@@ -84,25 +84,26 @@
 
 ## GitHub Pages 자동 배포(권장 워크플로 요약)
 
-목표: develop 브랜치에 푸시하면 GitHub Actions가 정적 사이트를 빌드하고 `gh-pages` 브랜치에 배포하여 GitHub Pages로 서빙합니다. 민감값(`config/firebase-config.js`)는 워크플로가 Secrets에서 읽어 파일을 생성합니다.
+목표: main 브랜치에 푸시하면 GitHub Actions가 정적 사이트를 빌드하고 GitHub Pages로 배포합니다. 민감값(`config/firebase-config.js`)는 워크플로가 Secrets에서 읽어 파일을 생성합니다. 이 레포에는 예시 워크플로 `.github/workflows/deploy.yml`가 포함되어 있습니다.
 
-필요한 GitHub Secrets:
-- FIREBASE_API_KEY
-- FIREBASE_AUTH_DOMAIN
-- FIREBASE_PROJECT_ID
-- FIREBASE_STORAGE_BUCKET
-- FIREBASE_MESSAGING_SENDER_ID
-- FIREBASE_APP_ID
-- FIREBASE_MEASUREMENT_ID (선택)
-- ADMIN_PASSWORD_HASH (현재 임시 해시를 넣거나, 대신 ADMIN_PASSWORD_RAW를 넣고 워크플로에서 해시하도록 구성할 수 있습니다)
+필요한 GitHub Secrets (프로젝트 필요에 맞게 선택):
+- ADMIN_PASSWORD_HASH (관리자 비밀번호의 SHA-256 헥스)
+- 추가로 Firebase 설정이 필요하면 아래 값을 추가하세요:
+  - FIREBASE_API_KEY
+  - FIREBASE_AUTH_DOMAIN
+  - FIREBASE_PROJECT_ID
+  - FIREBASE_STORAGE_BUCKET
+  - FIREBASE_MESSAGING_SENDER_ID
+  - FIREBASE_APP_ID
+  - FIREBASE_MEASUREMENT_ID (선택)
 
 워크플로(요약 동작):
 1. checkout
-2. copy 필요한 정적 파일
-3. create `config/firebase-config.js` from Secrets
-4. use actions-gh-pages or peaceiris/actions-gh-pages to push to `gh-pages`
+2. create `config/firebase-config.js` from Secrets (build-time)
+3. build (if 프로젝트에 빌드 스텝이 있다면 실행)
+4. deploy to GitHub Pages using peaceiris/actions-gh-pages
 
-참고: 배포 워크플로 파일은 `.github/workflows/deploy-gh-pages.yml`에 위치해야 합니다.
+참고: 워크플로는 `.github/workflows/deploy.yml`에 추가되어 있으며, 기본적으로 레포 루트(`./`)를 퍼블리시 대상(publish_dir)으로 사용합니다. 필요하면 `publish_dir`를 빌드 산출물 디렉토리(예: `./build` 또는 `./dist`)로 변경하세요.
 
 ## 테스트 및 검증
 

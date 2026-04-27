@@ -1087,8 +1087,23 @@ async function adminSignIn(password) {
   try {
     // We store a SHA-256 hex hash in config (window.__ADMIN_PASSWORD_HASH__) instead of plaintext.
     const storedHash = (typeof window !== 'undefined' && window.__ADMIN_PASSWORD_HASH__) ? window.__ADMIN_PASSWORD_HASH__ : null;
-    if (!storedHash) {
-      showToast('관리자 비밀번호가 설정되지 않았습니다.');
+    // Backwards compatibility: if an older config still exposes a plaintext password, hash it at runtime.
+    let effectiveHash = storedHash;
+    if (!effectiveHash && typeof window !== 'undefined' && window.__ADMIN_PASSWORD__) {
+      async function sha256HexFromString(str) {
+        const enc = new TextEncoder();
+        const data = enc.encode(str);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+      }
+      effectiveHash = await sha256HexFromString(window.__ADMIN_PASSWORD__);
+      // Cache computed hash on window so other code paths can read it.
+      window.__ADMIN_PASSWORD_HASH__ = effectiveHash;
+      console.warn('Using legacy window.__ADMIN_PASSWORD__ from config; computed SHA-256 at runtime. Replace with __ADMIN_PASSWORD_HASH__ in config for clarity.');
+    }
+    if (!effectiveHash) {
+      showToast('관리자 비밀번호가 설정되지 않았습니다. config/firebase-config.js에 window.__ADMIN_PASSWORD_HASH__ 값을 넣어주세요.');
       showErrorBox('window.__ADMIN_PASSWORD_HASH__ is not set in config/firebase-config.js');
       return;
     }
