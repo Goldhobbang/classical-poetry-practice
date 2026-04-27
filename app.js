@@ -1085,15 +1085,25 @@ if (!location.hash) {
 // Simple password-only admin authentication
 async function adminSignIn(password) {
   try {
-    const correctPassword = (typeof window !== 'undefined' && window.__ADMIN_PASSWORD__) ? window.__ADMIN_PASSWORD__ : null;
-    if (!correctPassword) {
+    // We store a SHA-256 hex hash in config (window.__ADMIN_PASSWORD_HASH__) instead of plaintext.
+    const storedHash = (typeof window !== 'undefined' && window.__ADMIN_PASSWORD_HASH__) ? window.__ADMIN_PASSWORD_HASH__ : null;
+    if (!storedHash) {
       showToast('관리자 비밀번호가 설정되지 않았습니다.');
-      showErrorBox('window.__ADMIN_PASSWORD__ is not set in config/firebase-config.js');
+      showErrorBox('window.__ADMIN_PASSWORD_HASH__ is not set in config/firebase-config.js');
       return;
     }
 
-    // Simple password check
-    if (password !== correctPassword) {
+    // Compute SHA-256 of provided password using Web Crypto
+    async function sha256Hex(str) {
+      const enc = new TextEncoder();
+      const data = enc.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    const providedHash = await sha256Hex(password);
+    if (providedHash !== storedHash) {
       showToast('비밀번호가 틀렸습니다.');
       return;
     }
